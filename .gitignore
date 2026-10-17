@@ -1,0 +1,5 @@
+# Local planning files: the map, the tickets, the drafts, and the session notes
+.scratch/
+
+# Local secrets
+.env
