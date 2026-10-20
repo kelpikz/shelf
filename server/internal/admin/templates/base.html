@@ -1,0 +1,17 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{template "title" .}} · shelf</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{template "content" .}}
+</body>
+</html>
+{{end}}
+
+{{define "logo"}}<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="3.2" height="13" rx="1"/><rect x="8.6" y="6.5" width="3.2" height="10.5" rx="1"/><path d="M13.4 8.1l3-.8 2.6 9.6-3 .8z"/><rect x="2" y="18.2" width="20" height="2" rx="1"/></svg>{{end}}
