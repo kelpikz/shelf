@@ -28,7 +28,6 @@ type Session struct {
 //
 // A session ends after IdleTTL without use, or MaxTTL after login, whichever
 // comes first. Use moves the idle deadline, at most once each RenewEvery.
-// See research/session-length.md.
 type Sessions struct {
 	db         *sql.DB
 	IdleTTL    time.Duration
