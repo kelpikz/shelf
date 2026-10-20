@@ -1,6 +1,10 @@
 # Local planning files: the map, the tickets, the drafts, and the session notes
 .scratch/
 
+# Local decision records and research reports. Not published.
+docs/
+research/
+
 # Local secrets
 .env
 

@@ -17,14 +17,14 @@ Building v1. The server has the GitHub login and the Admin page sessions. The Si
 | Path | What it is | In git |
 |---|---|---|
 | `CONTEXT.md` | The glossary. Use its words: Site, Owner, Visitor, Visibility, Archived, Index page, Admin page, Upload check. | Yes |
-| `docs/adr/` | Records of decisions that are hard to change. | Yes |
-| `research/` | Research reports. `research/README.md` is the brief for research agents. | Yes |
+| `docs/adr/` | Records of decisions that are hard to change. | No |
+| `research/` | Research reports. `research/README.md` is the brief for research agents. | No |
 | `.scratch/v1-spec/map.md` | The planning map: the scope of v1, the decisions so far, and what is out of scope. | No |
 | `.scratch/v1-spec/issues/` | The tickets. Each ticket holds one decision and its reasons. | No |
 | `.scratch/v1-spec/assets/modules-draft.md` | The draft of the modules, the API, and the CLI commands. | No |
 | `.scratch/sessionNotes/` | Short notes from each session. | No |
 
-`.scratch/` is in `.gitignore`. Do not commit it. Some search tools skip ignored files, so open these files by their path.
+`.scratch/`, `docs/`, and `research/` are in `.gitignore`. Do not commit them. Some search tools skip ignored files, so open these files by their path.
 
 ## Rules
 
