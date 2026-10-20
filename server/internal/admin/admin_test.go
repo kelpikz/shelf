@@ -45,7 +45,7 @@ func newApp(t *testing.T, id access.Identity) http.Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return New(owner, adminURL, &fakeGitHub{id: id}, access.NewSessions(db)).Handler()
+	return New(owner, 1, adminURL, &fakeGitHub{id: id}, access.NewSessions(db)).Handler()
 }
 
 var ownerID = access.Identity{ID: 1, Login: "ajitha", Emails: []access.Email{{Address: owner, Verified: true}}}
@@ -118,13 +118,21 @@ func TestOwnerLogsIn(t *testing.T) {
 }
 
 func TestUnverifiedEmailGetsThanks(t *testing.T) {
-	stranger := access.Identity{ID: 2, Login: "stranger", Emails: []access.Email{{Address: owner, Verified: false}}}
+	stranger := access.Identity{ID: 1, Login: "stranger", Emails: []access.Email{{Address: owner, Verified: false}}}
 	resp := login(t, newApp(t, stranger), "")
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(readBody(resp), "Thanks") {
 		t.Fatalf("got %d", resp.StatusCode)
 	}
 	if cookie(resp, sessionCookie) != nil {
 		t.Error("stranger got a session cookie")
+	}
+}
+
+func TestOtherAccountWithOwnerEmailGetsThanks(t *testing.T) {
+	stranger := access.Identity{ID: 2, Login: "stranger", Emails: []access.Email{{Address: owner, Verified: true}}}
+	resp := login(t, newApp(t, stranger), "")
+	if resp.StatusCode != http.StatusForbidden || cookie(resp, sessionCookie) != nil {
+		t.Fatalf("got %d and a session cookie", resp.StatusCode)
 	}
 }
 
@@ -148,7 +156,7 @@ func TestLogoutNeedsOriginAndCSRF(t *testing.T) {
 	r.AddCookie(sess)
 	m := csrfField.FindStringSubmatch(readBody(do(h, r)))
 	if m == nil {
-		t.Fatal("no csrf field on the admin page")
+		t.Fatal("no csrf field on the Admin page")
 	}
 	csrf := m[1]
 
@@ -186,7 +194,7 @@ func TestLogoutAllEndsEverySession(t *testing.T) {
 	r.AddCookie(second)
 	m := csrfField.FindStringSubmatch(readBody(do(h, r)))
 	if m == nil {
-		t.Fatal("no csrf field on the admin page")
+		t.Fatal("no csrf field on the Admin page")
 	}
 
 	post := func(origin string) *http.Response {
@@ -248,7 +256,7 @@ func TestOnlyPageVisitsRenew(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	sessions := access.NewSessions(db)
-	h := New(owner, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
+	h := New(owner, 1, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
 	sess := cookie(login(t, h, ""), sessionCookie)
 
 	later := time.Now().Add(2 * 24 * time.Hour)

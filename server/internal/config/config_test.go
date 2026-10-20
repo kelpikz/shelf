@@ -22,12 +22,32 @@ func TestLoadChecksValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("OWNER_EMAIL", tt.email)
+			t.Setenv("OWNER_GITHUB_ID", "1")
 			t.Setenv("GITHUB_CLIENT_ID", "id")
 			t.Setenv("GITHUB_CLIENT_SECRET", "secret")
 			t.Setenv("ADMIN_URL", tt.adminURL)
 			_, err := Load()
 			if (err == nil) != tt.ok {
 				t.Errorf("Load() error = %v, want ok = %v", err, tt.ok)
+			}
+		})
+	}
+}
+
+func TestLoadChecksOwnerGitHubID(t *testing.T) {
+	for id, ok := range map[string]bool{"583231": true, "": false, "ajitha": false, "0": false, "-1": false} {
+		t.Run(id, func(t *testing.T) {
+			t.Setenv("OWNER_EMAIL", "owner@example.com")
+			t.Setenv("OWNER_GITHUB_ID", id)
+			t.Setenv("GITHUB_CLIENT_ID", "id")
+			t.Setenv("GITHUB_CLIENT_SECRET", "secret")
+			t.Setenv("ADMIN_URL", "https://files-admin.example.com")
+			c, err := Load()
+			if (err == nil) != ok {
+				t.Fatalf("Load() error = %v, want ok = %v", err, ok)
+			}
+			if ok && c.OwnerGitHubID != 583231 {
+				t.Errorf("OwnerGitHubID = %d", c.OwnerGitHubID)
 			}
 		})
 	}

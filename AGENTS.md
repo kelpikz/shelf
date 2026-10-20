@@ -4,7 +4,7 @@
 
 ## Status
 
-Planning. There is no code yet. The planning map shows the open tickets.
+Building v1. The server has the GitHub login and the Admin page sessions. The Sites part, the CLI, and the deploy are not built yet. The planning map shows the open tickets.
 
 ## Stack
 

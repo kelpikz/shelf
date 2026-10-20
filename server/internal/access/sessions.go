@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Session is a logged-in Owner on the admin page.
+// Session is a logged-in Owner on the Admin page.
 type Session struct {
 	CSRF      string
 	GitHubID  int64
@@ -136,7 +136,7 @@ func (s *Sessions) Delete(ctx context.Context, token string) error {
 	return err
 }
 
-// DeleteAll ends every admin session, in every browser.
+// DeleteAll ends every Admin page session, in every browser.
 func (s *Sessions) DeleteAll(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions`)
 	if err != nil {

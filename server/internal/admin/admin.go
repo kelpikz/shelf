@@ -23,16 +23,17 @@ const (
 var files embed.FS
 
 type App struct {
-	OwnerEmail string
-	AdminURL   string // origin of the admin host, for the Origin check
-	Provider   access.Provider
-	Sessions   *access.Sessions
+	OwnerEmail    string
+	OwnerGitHubID int64
+	AdminURL      string // origin of the admin host, for the Origin check
+	Provider      access.Provider
+	Sessions      *access.Sessions
 
 	pages map[string]*template.Template
 }
 
-func New(ownerEmail, adminURL string, p access.Provider, s *access.Sessions) *App {
-	a := &App{OwnerEmail: ownerEmail, AdminURL: adminURL, Provider: p, Sessions: s, pages: map[string]*template.Template{}}
+func New(ownerEmail string, ownerGitHubID int64, adminURL string, p access.Provider, s *access.Sessions) *App {
+	a := &App{OwnerEmail: ownerEmail, OwnerGitHubID: ownerGitHubID, AdminURL: adminURL, Provider: p, Sessions: s, pages: map[string]*template.Template{}}
 	for _, name := range []string{"login.html", "thanks.html", "sites.html"} {
 		a.pages[name] = template.Must(template.ParseFS(files, "templates/base.html", "templates/"+name))
 	}
@@ -150,7 +151,7 @@ func (a *App) finishLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !access.IsOwner(id, a.OwnerEmail) {
+	if !access.IsOwner(id, a.OwnerEmail, a.OwnerGitHubID) {
 		// Store nothing about this person.
 		a.render(w, http.StatusForbidden, "thanks.html", map[string]any{"Login": id.Login})
 		return

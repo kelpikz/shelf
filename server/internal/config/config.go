@@ -9,11 +9,15 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+
+	"github.com/kelpikz/shelf/server/internal/utils"
 )
 
 type Config struct {
 	OwnerEmail         string
+	OwnerGitHubID      int64 // the number of the Owner's GitHub account; it never changes
 	GitHubClientID     string
 	GitHubClientSecret string
 	// AdminURL is the origin of the admin host, for example
@@ -39,9 +43,12 @@ func Load() (Config, error) {
 		Port:               envOr("PORT", "8080"),
 	}
 
+	ownerID := os.Getenv("OWNER_GITHUB_ID")
+
 	var missing []string
 	for name, v := range map[string]string{
 		"OWNER_EMAIL":          c.OwnerEmail,
+		"OWNER_GITHUB_ID":      ownerID,
 		"GITHUB_CLIENT_ID":     c.GitHubClientID,
 		"GITHUB_CLIENT_SECRET": c.GitHubClientSecret,
 		"ADMIN_URL":            c.AdminURL,
@@ -66,20 +73,16 @@ func Load() (Config, error) {
 	}
 
 	// The Owner check compares ASCII only (see access.IsOwner).
-	if !isASCII(c.OwnerEmail) || strings.Count(c.OwnerEmail, "@") != 1 {
+	if !utils.IsASCII(c.OwnerEmail) || strings.Count(c.OwnerEmail, "@") != 1 {
 		return Config{}, fmt.Errorf("OWNER_EMAIL must be one plain ASCII email address, got %q", c.OwnerEmail)
 	}
 
-	return c, nil
-}
-
-func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			return false
-		}
+	c.OwnerGitHubID, err = strconv.ParseInt(ownerID, 10, 64)
+	if err != nil || c.OwnerGitHubID <= 0 {
+		return Config{}, fmt.Errorf("OWNER_GITHUB_ID must be the number of a GitHub account, got %q", ownerID)
 	}
-	return true
+
+	return c, nil
 }
 
 func envOr(name, fallback string) string {

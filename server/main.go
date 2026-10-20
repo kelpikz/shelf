@@ -33,12 +33,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("Ended %d admin sessions.\n", n)
+		fmt.Printf("Ended %d Admin page sessions.\n", n)
 		return
 	}
 
 	github := access.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.AdminURL+"/auth/github/callback")
-	app := admin.New(cfg.OwnerEmail, cfg.AdminURL, github, access.NewSessions(db))
+	app := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, github, access.NewSessions(db))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
