@@ -62,6 +62,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// Browsers ignore this header on plain http, so local dev still works.
+		h.Set("Strict-Transport-Security", "max-age=31536000")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -72,14 +75,16 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	// Only a visit to the Admin page counts as use. If the renewal fails,
+	// Only a page visit by the person counts as use. If the renewal fails,
 	// the old deadline stays.
-	c, _ := r.Cookie(sessionCookie)
-	if renewed, ok, err := a.Sessions.Renew(r.Context(), c.Value, sess); err != nil {
-		log.Printf("session: renew: %v", err)
-	} else if ok {
-		sess = renewed
-		setSessionCookie(w, c.Value, sess.ExpiresAt)
+	if access.IsPageVisit(r) {
+		c, _ := r.Cookie(sessionCookie)
+		if renewed, ok, err := a.Sessions.Renew(r.Context(), c.Value, sess); err != nil {
+			log.Printf("session: renew: %v", err)
+		} else if ok {
+			sess = renewed
+			setSessionCookie(w, c.Value, sess.ExpiresAt)
+		}
 	}
 	a.render(w, http.StatusOK, "sites.html", map[string]any{"Session": sess})
 }
@@ -98,6 +103,11 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) startLogin(w http.ResponseWriter, r *http.Request) {
+	// A Site must not replace the login cookie of a login in progress.
+	if !access.IsPageVisit(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	state, verifier := access.RandomToken(), access.RandomToken()
 	// Lax, not Strict: the browser must send this cookie when GitHub sends
 	// the person back to the callback.
@@ -109,6 +119,11 @@ func (a *App) startLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) finishLogin(w http.ResponseWriter, r *http.Request) {
+	// A Site must not clear the login cookie of a login in progress.
+	if !access.IsPageVisit(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	clearCookie(w, loginCookie)
 	q := r.URL.Query()
 

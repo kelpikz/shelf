@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kelpikz/shelf/server/internal/access"
 	"github.com/kelpikz/shelf/server/internal/store"
@@ -229,6 +230,56 @@ func TestNewLoginEndsOldSession(t *testing.T) {
 	r.AddCookie(old)
 	if resp := do(h, r); resp.Header.Get("Location") != "/login" {
 		t.Error("old session still works after a new login")
+	}
+}
+
+// fromSite marks a request as an <img> on a Site of the same site.
+func fromSite(r *http.Request) *http.Request {
+	r.Header.Set("Sec-Fetch-Site", "same-site")
+	r.Header.Set("Sec-Fetch-Mode", "no-cors")
+	r.Header.Set("Sec-Fetch-Dest", "image")
+	return r
+}
+
+func TestOnlyPageVisitsRenew(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	sessions := access.NewSessions(db)
+	h := New(owner, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
+	sess := cookie(login(t, h, ""), sessionCookie)
+
+	later := time.Now().Add(2 * 24 * time.Hour)
+	sessions.Now = func() time.Time { return later }
+
+	r := fromSite(httptest.NewRequest("GET", "/", nil))
+	r.AddCookie(sess)
+	if c := cookie(do(h, r), sessionCookie); c != nil {
+		t.Error("a request from a Site renewed the session")
+	}
+
+	r = httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Sec-Fetch-Site", "none")
+	r.Header.Set("Sec-Fetch-Mode", "navigate")
+	r.Header.Set("Sec-Fetch-Dest", "document")
+	r.AddCookie(sess)
+	if c := cookie(do(h, r), sessionCookie); c == nil {
+		t.Error("a page visit did not renew the session")
+	}
+}
+
+func TestSiteCannotTouchLoginCookie(t *testing.T) {
+	h := newApp(t, ownerID)
+	for _, path := range []string{"/auth/github", "/auth/github/callback?error=access_denied"} {
+		resp := do(h, fromSite(httptest.NewRequest("GET", path, nil)))
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s: got %d", path, resp.StatusCode)
+		}
+		if cookie(resp, loginCookie) != nil {
+			t.Errorf("%s: changed the login cookie", path)
+		}
 	}
 }
 

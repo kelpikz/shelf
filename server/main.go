@@ -50,7 +50,11 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// The uploads will need more time. Give it to the upload handler
+		// with http.ResponseController, not here.
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 	log.Printf("shelf server listening on %s (admin: %s)", srv.Addr, cfg.AdminURL)
 	log.Fatal(srv.ListenAndServe())

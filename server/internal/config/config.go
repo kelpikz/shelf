@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"slices"
@@ -55,11 +56,30 @@ func Load() (Config, error) {
 	}
 
 	u, err := url.Parse(c.AdminURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.Path != "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		strings.ContainsAny(c.AdminURL, "#") {
 		return Config{}, fmt.Errorf("ADMIN_URL must look like https://files-admin.example.com, got %q", c.AdminURL)
+	}
+	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
+		log.Printf("warning: ADMIN_URL uses http, not https: %s", c.AdminURL)
+	}
+
+	// The Owner check compares ASCII only (see access.IsOwner).
+	if !isASCII(c.OwnerEmail) || strings.Count(c.OwnerEmail, "@") != 1 {
+		return Config{}, fmt.Errorf("OWNER_EMAIL must be one plain ASCII email address, got %q", c.OwnerEmail)
 	}
 
 	return c, nil
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func envOr(name, fallback string) string {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
@@ -52,6 +53,10 @@ func (g *GitHub) LoginURL(state, verifier string) string {
 }
 
 func (g *GitHub) Finish(ctx context.Context, code, verifier string) (Identity, error) {
+	// A slow GitHub must not hold the request open.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
 	tok, err := g.oauth.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return Identity{}, fmt.Errorf("github exchange: %w", err)
