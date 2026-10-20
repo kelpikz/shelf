@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/config"
@@ -359,5 +362,77 @@ func TestPublishSkipsDotfilesAndToolFolders(t *testing.T) {
 		if resp := ts.get(filesURL + p); resp.StatusCode != http.StatusNotFound {
 			t.Errorf("%s: got %d", p, resp.StatusCode)
 		}
+	}
+}
+
+// Two uploads in one second have the same Last-Modified. The browser must
+// still get the new files.
+func TestBrowserGetsNewUploadInTheSameSecond(t *testing.T) {
+	ts := newServer(t)
+	now := time.Now()
+	ts.sites.Now = func() time.Time { return now }
+	ts.publish(t, "notes", map[string]string{"index.html": "v1"})
+	ts.sites.SetVisibility(context.Background(), "notes", sites.Public)
+
+	first := ts.get(filesURL + "/notes/")
+	conditional := func() *http.Response {
+		r := httptest.NewRequest("GET", filesURL+"/notes/", nil)
+		r.Header.Set("If-Modified-Since", first.Header.Get("Last-Modified"))
+		if etag := first.Header.Get("ETag"); etag != "" {
+			r.Header.Set("If-None-Match", etag)
+		}
+		w := httptest.NewRecorder()
+		ts.h.ServeHTTP(w, r)
+		return w.Result()
+	}
+	if resp := conditional(); resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("no change: got %d, want 304", resp.StatusCode)
+	}
+
+	ts.publish(t, "notes", map[string]string{"index.html": "v2"})
+	resp := conditional()
+	if got := body(resp); resp.StatusCode != http.StatusOK || got != "v2" {
+		t.Fatalf("after a new upload: got %d %q", resp.StatusCode, got)
+	}
+}
+
+// A replace must never make a Visitor see "not found" for a Site that exists.
+func TestReplaceDoesNotBreakVisitors(t *testing.T) {
+	ts := newServer(t)
+	ts.publish(t, "notes", map[string]string{"index.html": "notes"})
+	ts.sites.SetVisibility(context.Background(), "notes", sites.Public)
+
+	local := t.TempDir()
+	os.WriteFile(filepath.Join(local, "index.html"), []byte("notes"), 0o644)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			if _, err := ts.sites.PublishLocal(context.Background(), "notes", local); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+
+	var misses atomic.Int64
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if resp := ts.get(filesURL + "/notes/"); resp.StatusCode != http.StatusOK {
+					misses.Add(1)
+				}
+			}
+		})
+	}
+	readers.Wait()
+	if n := misses.Load(); n > 0 {
+		t.Errorf("%d requests did not get the Site during replaces", n)
 	}
 }

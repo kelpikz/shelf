@@ -55,35 +55,71 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A replace deletes the old folder. If that happens between the record
+	// lookup and the file open, look again: the record points to the new
+	// folder. Three tries are enough for replaces that come one after another.
+	for range 3 {
+		if !s.serveSite(w, r) {
+			return
+		}
+	}
+	s.notFound(w, r)
+}
+
+// serveSite serves a request for a Site. It reports true, and writes
+// nothing, when the Site got new files while it ran.
+func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool) {
 	path, rest, hasSlash := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	site, ok, err := s.Sites.Get(r.Context(), path)
 	if err != nil {
 		s.serverError(w, err)
-		return
+		return false
 	}
 	if !ok || site.Archived || site.Visibility != sites.Public {
 		s.notFound(w, r)
-		return
+		return false
 	}
 
+	name := site.File
 	if site.Kind == sites.File {
 		if hasSlash {
 			s.notFound(w, r)
-			return
+			return false
 		}
-		s.serveFile(w, r, site, site.File)
-		return
+	} else {
+		// Links in the Site's HTML resolve from /path/, so send /path there.
+		if !hasSlash {
+			redirect(w, r, "/"+path+"/")
+			return false
+		}
+		name = rest
+		if name == "" || strings.HasSuffix(name, "/") {
+			name += "index.html"
+		}
 	}
 
-	// Links in the Site's HTML resolve from /path/, so send /path there.
-	if !hasSlash {
-		redirect(w, r, "/"+path+"/")
-		return
+	f, err := s.Sites.Open(site, name)
+	if err != nil {
+		if now, ok, _ := s.Sites.Get(r.Context(), path); ok && now.Version() != site.Version() {
+			return true
+		}
+		s.notFound(w, r)
+		return false
 	}
-	if rest == "" || strings.HasSuffix(rest, "/") {
-		rest += "index.html"
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		s.notFound(w, r)
+		return false
 	}
-	s.serveFile(w, r, site, rest)
+	// Last-Modified has whole seconds only, so two uploads in one second
+	// share it. The ETag changes with each upload, and browsers check it
+	// first.
+	w.Header().Set("ETag", `"`+site.Version()+`"`)
+	// The upload time, not the file time from the Owner's PC. An old file
+	// time makes browsers keep a new upload for a long time.
+	http.ServeContent(w, r, name, site.UpdatedAt, f)
+	return false
 }
 
 // index is the Index page: all Public Sites that are not archived.
@@ -100,23 +136,6 @@ func (s *Serving) index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.render(w, http.StatusOK, "index.html", map[string]any{"Sites": public})
-}
-
-func (s *Serving) serveFile(w http.ResponseWriter, r *http.Request, site sites.Site, name string) {
-	f, err := s.Sites.Open(site, name)
-	if err != nil {
-		s.notFound(w, r)
-		return
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.IsDir() {
-		s.notFound(w, r)
-		return
-	}
-	// The upload time, not the file time from the Owner's PC. An old file
-	// time makes browsers keep a new upload for a long time.
-	http.ServeContent(w, r, name, site.UpdatedAt, f)
 }
 
 // redirect is a 302 with no-store. Chrome keeps a 301 for ever.
