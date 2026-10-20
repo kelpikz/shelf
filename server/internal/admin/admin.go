@@ -48,6 +48,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/github", a.startLogin)
 	mux.HandleFunc("GET /auth/github/callback", a.finishLogin)
 	mux.HandleFunc("POST /logout", a.logout)
+	mux.HandleFunc("POST /logout-all", a.logoutAll)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
@@ -70,6 +71,15 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
+	}
+	// Only a visit to the Admin page counts as use. If the renewal fails,
+	// the old deadline stays.
+	c, _ := r.Cookie(sessionCookie)
+	if renewed, ok, err := a.Sessions.Renew(r.Context(), c.Value, sess); err != nil {
+		log.Printf("session: renew: %v", err)
+	} else if ok {
+		sess = renewed
+		setSessionCookie(w, c.Value, sess.ExpiresAt)
 	}
 	a.render(w, http.StatusOK, "sites.html", map[string]any{"Session": sess})
 }
@@ -131,37 +141,65 @@ func (a *App) finishLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A new login replaces the session that this browser had before.
+	if old, err := r.Cookie(sessionCookie); err == nil {
+		if err := a.Sessions.Delete(r.Context(), old.Value); err != nil {
+			log.Printf("login: delete old session: %v", err)
+		}
+	}
+
 	token, sess, err := a.Sessions.Create(r.Context(), id)
 	if err != nil {
 		a.serverError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/",
-		Expires: sess.ExpiresAt, MaxAge: int(time.Until(sess.ExpiresAt).Seconds()),
-		Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
-	})
+	setSessionCookie(w, token, sess.ExpiresAt)
 	log.Printf("login: owner %s", id.Login)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
-	sess, ok := a.session(w, r)
+	token, ok := a.checkPost(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if !access.SameOrigin(r, a.AdminURL) || !access.Equal(r.PostFormValue("csrf"), sess.CSRF) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	c, _ := r.Cookie(sessionCookie)
-	if err := a.Sessions.Delete(r.Context(), c.Value); err != nil {
+	if err := a.Sessions.Delete(r.Context(), token); err != nil {
 		a.serverError(w, err)
 		return
 	}
 	clearCookie(w, sessionCookie)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// logoutAll ends the Admin page session in every browser, this one too.
+func (a *App) logoutAll(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.checkPost(w, r); !ok {
+		return
+	}
+	n, err := a.Sessions.DeleteAll(r.Context())
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	log.Printf("logout-all: ended %d sessions", n)
+	clearCookie(w, sessionCookie)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// checkPost checks the session, the Origin, and the CSRF token of a form
+// post. If a check fails, it writes the response and reports false.
+func (a *App) checkPost(w http.ResponseWriter, r *http.Request) (token string, ok bool) {
+	sess, ok := a.session(w, r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return "", false
+	}
+	if !access.SameOrigin(r, a.AdminURL) || !access.Equal(r.PostFormValue("csrf"), sess.CSRF) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return "", false
+	}
+	c, _ := r.Cookie(sessionCookie)
+	return c.Value, true
 }
 
 // session gives the Owner's session. If the database fails, it logs the
@@ -193,6 +231,14 @@ func (a *App) render(w http.ResponseWriter, status int, page string, data any) {
 func (a *App) serverError(w http.ResponseWriter, err error) {
 	log.Printf("error: %v", err)
 	http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+}
+
+func setSessionCookie(w http.ResponseWriter, token string, expires time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: token, Path: "/",
+		Expires: expires, MaxAge: int(time.Until(expires).Seconds()),
+		Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func clearCookie(w http.ResponseWriter, name string) {

@@ -176,6 +176,62 @@ func TestLogoutNeedsOriginAndCSRF(t *testing.T) {
 	}
 }
 
+func TestLogoutAllEndsEverySession(t *testing.T) {
+	h := newApp(t, ownerID)
+	first := cookie(login(t, h, ""), sessionCookie)
+	second := cookie(login(t, h, ""), sessionCookie)
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.AddCookie(second)
+	m := csrfField.FindStringSubmatch(readBody(do(h, r)))
+	if m == nil {
+		t.Fatal("no csrf field on the admin page")
+	}
+
+	post := func(origin string) *http.Response {
+		r := httptest.NewRequest("POST", "/logout-all", strings.NewReader("csrf="+url.QueryEscape(m[1])))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Origin", origin)
+		r.AddCookie(second)
+		return do(h, r)
+	}
+	if resp := post("https://files.example.com"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("other origin: got %d", resp.StatusCode)
+	}
+	if resp := post(adminURL); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("logout-all: got %d", resp.StatusCode)
+	}
+
+	for _, c := range []*http.Cookie{first, second} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.AddCookie(c)
+		if resp := do(h, r); resp.Header.Get("Location") != "/login" {
+			t.Error("a session still works after logout-all")
+		}
+	}
+}
+
+func TestNewLoginEndsOldSession(t *testing.T) {
+	h := newApp(t, ownerID)
+	old := cookie(login(t, h, ""), sessionCookie)
+
+	// Log in again in the same browser, which still sends the old cookie.
+	start := do(h, httptest.NewRequest("GET", "/auth/github", nil))
+	loc, _ := url.Parse(start.Header.Get("Location"))
+	r := httptest.NewRequest("GET", "/auth/github/callback?code=abc&state="+url.QueryEscape(loc.Query().Get("state")), nil)
+	r.AddCookie(cookie(start, loginCookie))
+	r.AddCookie(old)
+	if cookie(do(h, r), sessionCookie) == nil {
+		t.Fatal("no new session cookie")
+	}
+
+	r = httptest.NewRequest("GET", "/", nil)
+	r.AddCookie(old)
+	if resp := do(h, r); resp.Header.Get("Location") != "/login" {
+		t.Error("old session still works after a new login")
+	}
+}
+
 func readBody(resp *http.Response) string {
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)

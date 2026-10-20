@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/kelpikz/shelf/server/internal/access"
@@ -22,6 +25,17 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	// "server logout-all" ends every Admin page session. Use it when no
+	// browser is logged in, for example after a lost laptop.
+	if len(os.Args) > 1 && os.Args[1] == "logout-all" {
+		n, err := access.NewSessions(db).DeleteAll(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Ended %d admin sessions.\n", n)
+		return
+	}
 
 	github := access.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.AdminURL+"/auth/github/callback")
 	app := admin.New(cfg.OwnerEmail, cfg.AdminURL, github, access.NewSessions(db))

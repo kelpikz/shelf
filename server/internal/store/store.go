@@ -12,12 +12,15 @@ import (
 
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
-	id_hash    TEXT PRIMARY KEY,
-	csrf       TEXT NOT NULL,
-	github_id  INTEGER NOT NULL,
-	login      TEXT NOT NULL,
-	avatar_url TEXT NOT NULL,
-	expires_at INTEGER NOT NULL
+	id_hash         TEXT PRIMARY KEY,
+	csrf            TEXT NOT NULL,
+	github_id       INTEGER NOT NULL,
+	login           TEXT NOT NULL,
+	avatar_url      TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	renewed_at      INTEGER NOT NULL,
+	idle_expires_at INTEGER NOT NULL,
+	max_expires_at  INTEGER NOT NULL
 );
 `
 

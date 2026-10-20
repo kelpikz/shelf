@@ -21,5 +21,16 @@
     <p class="muted">Upload one with the CLI:</p>
     <code>shelf upload &lt;folder&gt; &lt;path&gt;</code>
   </section>
+
+  <section class="card setting">
+    <div>
+      <h2>Log out all browsers</h2>
+      <p class="muted">Ends the Admin page login on every computer, this one too. Use it if you lose a device.</p>
+    </div>
+    <form method="post" action="/logout-all">
+      <input type="hidden" name="csrf" value="{{.Session.CSRF}}">
+      <button class="btn btn-ghost btn-small" type="submit">Log out all</button>
+    </form>
+  </section>
 </main>
 {{end}}
