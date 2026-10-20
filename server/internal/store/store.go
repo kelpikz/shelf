@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 	idle_expires_at INTEGER NOT NULL,
 	max_expires_at  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sites (
+	id          INTEGER PRIMARY KEY,
+	path        TEXT NOT NULL UNIQUE,
+	kind        TEXT NOT NULL,             -- "file" or "folder"
+	file        TEXT NOT NULL,             -- the file name of a one-file Site
+	folder      TEXT NOT NULL,             -- the folder in DATA_DIR/sites
+	visibility  TEXT NOT NULL,             -- "public" or "private"
+	archived    INTEGER NOT NULL,
+	created_at  INTEGER NOT NULL,
+	updated_at  INTEGER NOT NULL           -- the last upload
+);
 `
 
 // Open opens (or creates) shelf.db in dataDir.

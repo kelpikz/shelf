@@ -1,9 +1,11 @@
-// Package admin is the Admin page: login, logout, and the list of Sites.
+// Package admin is the Admin page: login, logout, and the list of Sites with
+// their actions.
 package admin
 
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"html/template"
 	"io/fs"
 	"log"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"github.com/kelpikz/shelf/server/internal/access"
+	"github.com/kelpikz/shelf/server/internal/config"
+	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
 const (
@@ -26,16 +30,27 @@ type App struct {
 	OwnerEmail    string
 	OwnerGitHubID int64
 	AdminURL      string // origin of the admin host, for the Origin check
+	FilesURL      string // origin of the Sites host, for the links to Sites
 	Provider      access.Provider
 	Sessions      *access.Sessions
+	Sites         *sites.Sites
 
 	pages map[string]*template.Template
 }
 
-func New(ownerEmail string, ownerGitHubID int64, adminURL string, p access.Provider, s *access.Sessions) *App {
-	a := &App{OwnerEmail: ownerEmail, OwnerGitHubID: ownerGitHubID, AdminURL: adminURL, Provider: p, Sessions: s, pages: map[string]*template.Template{}}
+func New(cfg config.Config, p access.Provider, s *access.Sessions, st *sites.Sites) *App {
+	a := &App{
+		OwnerEmail: cfg.OwnerEmail, OwnerGitHubID: cfg.OwnerGitHubID, AdminURL: cfg.AdminURL, FilesURL: cfg.FilesURL,
+		Provider: p, Sessions: s, Sites: st, pages: map[string]*template.Template{},
+	}
+	funcs := template.FuncMap{
+		// site gives the "site" template one Site and what its forms need.
+		"site": func(page map[string]any, site sites.Site) map[string]any {
+			return map[string]any{"Site": site, "FilesURL": page["FilesURL"], "CSRF": page["Session"].(access.Session).CSRF}
+		},
+	}
 	for _, name := range []string{"login.html", "thanks.html", "sites.html"} {
-		a.pages[name] = template.Must(template.ParseFS(files, "templates/base.html", "templates/"+name))
+		a.pages[name] = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/base.html", "templates/"+name))
 	}
 	return a
 }
@@ -50,6 +65,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/github/callback", a.finishLogin)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("POST /logout-all", a.logoutAll)
+	mux.HandleFunc("POST /sites/{path}/{action}", a.siteAction)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
@@ -87,7 +103,69 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 			setSessionCookie(w, c.Value, sess.ExpiresAt)
 		}
 	}
-	a.render(w, http.StatusOK, "sites.html", map[string]any{"Session": sess})
+	all, err := a.Sites.List(r.Context())
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	var live, archived []sites.Site
+	for _, site := range all {
+		if site.Archived {
+			archived = append(archived, site)
+		} else {
+			live = append(live, site)
+		}
+	}
+	a.render(w, http.StatusOK, "sites.html", map[string]any{
+		"Session": sess, "Sites": live, "Archived": archived, "FilesURL": a.FilesURL,
+		"Error": siteErrors[r.URL.Query().Get("error")],
+	})
+}
+
+var siteErrors = map[string]string{
+	"confirm": "Nothing was deleted. Type the path exactly to delete a Site.",
+	"gone":    "That Site does not exist any more.",
+}
+
+// siteAction runs one button of the Admin page on one Site.
+func (a *App) siteAction(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.checkPost(w, r); !ok {
+		return
+	}
+	ctx, path := r.Context(), r.PathValue("path")
+	var err error
+	switch r.PathValue("action") {
+	case "public":
+		err = a.Sites.SetVisibility(ctx, path, sites.Public)
+	case "private":
+		err = a.Sites.SetVisibility(ctx, path, sites.Private)
+	case "archive":
+		err = a.Sites.SetArchived(ctx, path, true)
+	case "unarchive":
+		err = a.Sites.SetArchived(ctx, path, false)
+	case "delete":
+		// The Owner types the path to confirm.
+		if r.PostFormValue("confirm") != path {
+			http.Redirect(w, r, "/?error=confirm", http.StatusSeeOther)
+			return
+		}
+		err = a.Sites.Delete(ctx, path)
+		if err == nil {
+			log.Printf("sites: deleted %s", path)
+		}
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, sites.ErrNotFound) {
+		http.Redirect(w, r, "/?error=gone", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 var loginErrors = map[string]string{

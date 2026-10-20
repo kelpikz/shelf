@@ -23,6 +23,9 @@ type Config struct {
 	// AdminURL is the origin of the admin host, for example
 	// "https://files-admin.ajitha.fyi". It has no path and no trailing slash.
 	AdminURL string
+	// FilesURL is the origin of the Sites host, for example
+	// "https://files.ajitha.fyi". It has no path and no trailing slash.
+	FilesURL string
 	DataDir  string
 	Port     string
 }
@@ -39,6 +42,7 @@ func Load() (Config, error) {
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		AdminURL:           strings.TrimSuffix(os.Getenv("ADMIN_URL"), "/"),
+		FilesURL:           strings.TrimSuffix(os.Getenv("FILES_URL"), "/"),
 		DataDir:            envOr("DATA_DIR", "data"),
 		Port:               envOr("PORT", "8080"),
 	}
@@ -52,6 +56,7 @@ func Load() (Config, error) {
 		"GITHUB_CLIENT_ID":     c.GitHubClientID,
 		"GITHUB_CLIENT_SECRET": c.GitHubClientSecret,
 		"ADMIN_URL":            c.AdminURL,
+		"FILES_URL":            c.FilesURL,
 	} {
 		if v == "" {
 			missing = append(missing, name)
@@ -62,14 +67,17 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("missing env variables: %s", strings.Join(missing, ", "))
 	}
 
-	u, err := url.Parse(c.AdminURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
-		u.Path != "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
-		strings.ContainsAny(c.AdminURL, "#") {
-		return Config{}, fmt.Errorf("ADMIN_URL must look like https://files-admin.example.com, got %q", c.AdminURL)
+	admin, err := checkOrigin("ADMIN_URL", c.AdminURL, "https://files-admin.example.com")
+	if err != nil {
+		return Config{}, err
 	}
-	if u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
-		log.Printf("warning: ADMIN_URL uses http, not https: %s", c.AdminURL)
+	files, err := checkOrigin("FILES_URL", c.FilesURL, "https://files.example.com")
+	if err != nil {
+		return Config{}, err
+	}
+	// The server picks the Admin page or the Sites by the host name.
+	if strings.EqualFold(admin.Host, files.Host) {
+		return Config{}, fmt.Errorf("ADMIN_URL and FILES_URL must have different hosts, got %q for both", admin.Host)
 	}
 
 	// The Owner check compares ASCII only (see access.IsOwner).
@@ -83,6 +91,21 @@ func Load() (Config, error) {
 	}
 
 	return c, nil
+}
+
+// checkOrigin checks that value is a plain origin, like example.
+func checkOrigin(name, value, example string) (*url.URL, error) {
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.Path != "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		strings.ContainsAny(value, "#") {
+		return nil, fmt.Errorf("%s must look like %s, got %q", name, example, value)
+	}
+	host := u.Hostname()
+	if u.Scheme == "http" && host != "localhost" && host != "127.0.0.1" && !strings.HasSuffix(host, ".localhost") {
+		log.Printf("warning: %s uses http, not https: %s", name, value)
+	}
+	return u, nil
 }
 
 func envOr(name, fallback string) string {

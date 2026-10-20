@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kelpikz/shelf/server/internal/access"
+	"github.com/kelpikz/shelf/server/internal/config"
+	"github.com/kelpikz/shelf/server/internal/sites"
 	"github.com/kelpikz/shelf/server/internal/store"
 )
 
@@ -38,14 +40,17 @@ func (f *fakeGitHub) Finish(_ context.Context, code, verifier string) (access.Id
 	return f.id, nil
 }
 
+var cfg = config.Config{OwnerEmail: owner, OwnerGitHubID: 1, AdminURL: adminURL, FilesURL: "https://files.example.com"}
+
 func newApp(t *testing.T, id access.Identity) http.Handler {
 	t.Helper()
-	db, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	db, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return New(owner, 1, adminURL, &fakeGitHub{id: id}, access.NewSessions(db)).Handler()
+	return New(cfg, &fakeGitHub{id: id}, access.NewSessions(db), sites.New(db, dir)).Handler()
 }
 
 var ownerID = access.Identity{ID: 1, Login: "ajitha", Emails: []access.Email{{Address: owner, Verified: true}}}
@@ -250,13 +255,14 @@ func fromSite(r *http.Request) *http.Request {
 }
 
 func TestOnlyPageVisitsRenew(t *testing.T) {
-	db, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	db, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
 	sessions := access.NewSessions(db)
-	h := New(owner, 1, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
+	h := New(cfg, &fakeGitHub{id: ownerID}, sessions, sites.New(db, dir)).Handler()
 	sess := cookie(login(t, h, ""), sessionCookie)
 
 	later := time.Now().Add(2 * 24 * time.Hour)
