@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -105,6 +106,9 @@ func (s *Sites) List(ctx context.Context) ([]Site, error) {
 	}
 	return list, rows.Err()
 }
+
+// Version changes with each upload. Serving uses it as the ETag.
+func (site Site) Version() string { return site.folder }
 
 // URL gives the address of the Site relative to the Sites host.
 func (site Site) URL() string {
@@ -269,6 +273,19 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 	tr := tar.NewReader(gz)
 	var names []string
 	var unpacked int64
+	// dirs holds each folder that the upload makes, also the parents that a
+	// file name like "a/b/c.txt" makes. Folders use disk space, so they
+	// count toward MaxFiles.
+	dirs := map[string]bool{}
+	addDirs := func(dir string) error {
+		for ; dir != "."; dir = pathpkg.Dir(dir) {
+			dirs[dir] = true
+		}
+		if len(names)+len(dirs) > s.MaxFiles {
+			return badUpload("more than %d files and folders", s.MaxFiles)
+		}
+		return nil
+	}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -290,6 +307,9 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 			if kind == File {
 				return "", badUpload("a one-file Site has no folders")
 			}
+			if err := addDirs(name); err != nil {
+				return "", err
+			}
 			if err := root.MkdirAll(filepath.FromSlash(name), 0o755); err != nil {
 				return "", err
 			}
@@ -301,8 +321,8 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 
 		names = append(names, name)
 		unpacked += h.Size
-		if len(names) > s.MaxFiles {
-			return "", badUpload("more than %d files", s.MaxFiles)
+		if err := addDirs(pathpkg.Dir(name)); err != nil {
+			return "", err
 		}
 		if h.Size < 0 || unpacked > s.MaxUnpacked {
 			return "", badUpload("more than %d MB after unpacking", s.MaxUnpacked>>20)
@@ -313,6 +333,15 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 			}
 			return "", badUpload("cannot write %q: %v", name, err)
 		}
+	}
+
+	// The tar end is not the stream end. Read the rest, so that the gzip
+	// checksum is checked and data after the end counts toward MaxUpload.
+	if _, err := io.Copy(io.Discard, gz); err != nil {
+		if errors.Is(err, ErrBadUpload) {
+			return "", err
+		}
+		return "", badUpload("broken .tar.gz: %v", err)
 	}
 
 	switch {

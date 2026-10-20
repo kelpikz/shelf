@@ -194,3 +194,51 @@ func TestCleanupRemovesUnusedFolders(t *testing.T) {
 	}
 	f.Close()
 }
+
+// The whole stream must be checked, not only the part up to the tar end.
+func TestPublishChecksTheWholeStream(t *testing.T) {
+	ctx := context.Background()
+	index := entry{name: "index.html", body: "x"}
+
+	s, _ := newSites(t)
+	bad := tarGz(t, index).Bytes()
+	bad[len(bad)-8] ^= 0xff // the gzip checksum is in the last 8 bytes
+	if _, err := s.Publish(ctx, "notes", Folder, bytes.NewReader(bad)); !errors.Is(err, ErrBadUpload) {
+		t.Errorf("bad checksum: got %v", err)
+	}
+
+	s, _ = newSites(t)
+	good := tarGz(t, index).Bytes()
+	s.MaxUpload = int64(len(good)) + 100
+	tail := append(good, bytes.Repeat([]byte{0}, 1000)...)
+	if _, err := s.Publish(ctx, "notes", Folder, bytes.NewReader(tail)); !errors.Is(err, ErrBadUpload) {
+		t.Errorf("data after the end: got %v", err)
+	}
+}
+
+// Folders use disk space too, so they count toward MaxFiles.
+func TestPublishCountsFolders(t *testing.T) {
+	ctx := context.Background()
+	index := entry{name: "index.html", body: "x"}
+
+	s, _ := newSites(t)
+	s.MaxFiles = 3
+	dirs := []entry{index, {name: "a/", typ: tar.TypeDir}, {name: "b/", typ: tar.TypeDir}, {name: "c/", typ: tar.TypeDir}}
+	if _, err := s.Publish(ctx, "notes", Folder, tarGz(t, dirs...)); !errors.Is(err, ErrBadUpload) {
+		t.Errorf("folder entries: got %v", err)
+	}
+
+	s, _ = newSites(t)
+	s.MaxFiles = 3
+	deep := entry{name: "a/b/c/d/e.txt", body: "x"}
+	if _, err := s.Publish(ctx, "notes", Folder, tarGz(t, index, deep)); !errors.Is(err, ErrBadUpload) {
+		t.Errorf("folders from a deep file name: got %v", err)
+	}
+
+	s, _ = newSites(t)
+	s.MaxFiles = 3
+	ok := []entry{index, {name: "css/", typ: tar.TypeDir}, {name: "css/a.css", body: "x"}}
+	if _, err := s.Publish(ctx, "notes", Folder, tarGz(t, ok...)); err != nil {
+		t.Errorf("3 entries with a limit of 3: got %v", err)
+	}
+}
