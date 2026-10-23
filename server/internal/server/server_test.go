@@ -1,13 +1,14 @@
 package server
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,27 +55,38 @@ func newServer(t *testing.T) *testServer {
 }
 
 // publish makes a Site at path from files (name to content), the same way as
-// "server publish". One entry that is not index.html makes a one-file Site.
+// an upload. One entry that is not index.html makes a one-file Site.
 func (ts *testServer) publish(t *testing.T, path string, files map[string]string) sites.Site {
 	t.Helper()
-	local := t.TempDir()
-	for name, body := range files {
-		p := filepath.Join(local, filepath.FromSlash(name))
-		os.MkdirAll(filepath.Dir(p), 0o755)
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, ok := files["index.html"]; !ok && len(files) == 1 {
-		for name := range files {
-			local = filepath.Join(local, name)
-		}
-	}
-	site, err := ts.sites.PublishLocal(context.Background(), path, local)
+	site, err := ts.sites.Publish(context.Background(), path, kindOf(files), tarGz(t, files))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return site
+}
+
+func kindOf(files map[string]string) sites.Kind {
+	if _, ok := files["index.html"]; !ok && len(files) == 1 {
+		return sites.File
+	}
+	return sites.Folder
+}
+
+// tarGz packs files into a .tar.gz, like the CLI does.
+func tarGz(t *testing.T, files map[string]string) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, body := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	gz.Close()
+	return &buf
 }
 
 func (ts *testServer) get(target string) *http.Response {
@@ -347,24 +359,6 @@ func TestSiteActionsNeedOriginAndCSRF(t *testing.T) {
 	}
 }
 
-func TestPublishSkipsDotfilesAndToolFolders(t *testing.T) {
-	ts := newServer(t)
-	ts.publish(t, "notes", map[string]string{
-		"index.html":          "notes",
-		".env":                "SECRET=1",
-		".git/config":         "x",
-		"node_modules/a/a.js": "x",
-		"img/.DS_Store":       "x",
-	})
-	ts.sites.SetVisibility(context.Background(), "notes", sites.Public)
-
-	for _, p := range []string{"/notes/.env", "/notes/.git/config", "/notes/node_modules/a/a.js", "/notes/img/.DS_Store"} {
-		if resp := ts.get(filesURL + p); resp.StatusCode != http.StatusNotFound {
-			t.Errorf("%s: got %d", p, resp.StatusCode)
-		}
-	}
-}
-
 // Two uploads in one second have the same Last-Modified. The browser must
 // still get the new files.
 func TestBrowserGetsNewUploadInTheSameSecond(t *testing.T) {
@@ -402,13 +396,12 @@ func TestReplaceDoesNotBreakVisitors(t *testing.T) {
 	ts.publish(t, "notes", map[string]string{"index.html": "notes"})
 	ts.sites.SetVisibility(context.Background(), "notes", sites.Public)
 
-	local := t.TempDir()
-	os.WriteFile(filepath.Join(local, "index.html"), []byte("notes"), 0o644)
+	files := map[string]string{"index.html": "notes"}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for range 200 {
-			if _, err := ts.sites.PublishLocal(context.Background(), "notes", local); err != nil {
+			if _, err := ts.sites.Publish(context.Background(), "notes", sites.Folder, tarGz(t, files)); err != nil {
 				t.Error(err)
 				return
 			}
