@@ -251,6 +251,34 @@ func (c *CLI) CheckKey(ctx context.Context, key string) (Key, bool, error) {
 	return k, true, nil
 }
 
+// Keys lists the CLI keys that have not expired, newest first.
+func (c *CLI) Keys(ctx context.Context) ([]Key, error) {
+	rows, err := c.db.QueryContext(ctx,
+		`SELECT id, device_name, created_at, expires_at, last_used_at FROM cli_keys
+		 WHERE expires_at > ? ORDER BY created_at DESC, id DESC`, c.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []Key
+	for rows.Next() {
+		var k Key
+		var created, expires, used int64
+		if err := rows.Scan(&k.ID, &k.DeviceName, &created, &expires, &used); err != nil {
+			return nil, err
+		}
+		k.CreatedAt, k.ExpiresAt, k.LastUsedAt = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(used, 0)
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+// Revoke deletes a CLI key. An unknown id is not an error.
+func (c *CLI) Revoke(ctx context.Context, id int64) error {
+	_, err := c.db.ExecContext(ctx, `DELETE FROM cli_keys WHERE id = ?`, id)
+	return err
+}
+
 func newUserCode() string {
 	b := make([]byte, 0, userCodeLen)
 	buf := make([]byte, 1)

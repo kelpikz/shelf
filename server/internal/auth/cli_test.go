@@ -154,6 +154,31 @@ func TestKeyEndsAfter30Days(t *testing.T) {
 	}
 }
 
+func TestRevokedKeyRefused(t *testing.T) {
+	c, _ := newCLI(t)
+	ctx := context.Background()
+	a, b := approvedKey(t, c), approvedKey(t, c)
+
+	keys, err := c.Keys(ctx)
+	if err != nil || len(keys) != 2 {
+		t.Fatalf("Keys: %d keys, %v", len(keys), err)
+	}
+	ka, _, _ := c.CheckKey(ctx, a)
+	if err := c.Revoke(ctx, ka.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok, _ := c.CheckKey(ctx, a); ok {
+		t.Error("revoked key still works")
+	}
+	if _, ok, _ := c.CheckKey(ctx, b); !ok {
+		t.Error("revoke cancelled the other key too")
+	}
+	if keys, _ := c.Keys(ctx); len(keys) != 1 || keys[0].ID == ka.ID {
+		t.Errorf("Keys after revoke: %+v", keys)
+	}
+}
+
 func approvedKey(t *testing.T, c *CLI) string {
 	t.Helper()
 	ctx := context.Background()
