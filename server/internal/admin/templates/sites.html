@@ -15,12 +15,28 @@
 
 <main class="page">
   <h1>Sites</h1>
+  {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
+
+  {{if .Sites}}
+  <section class="card list">
+    {{range .Sites}}{{template "site" (site $ .)}}{{end}}
+  </section>
+  {{else}}
   <section class="card empty">
     {{template "logo"}}
     <h2>No Sites yet</h2>
     <p class="muted">Upload one with the CLI:</p>
     <code>shelf upload &lt;folder&gt; &lt;path&gt;</code>
   </section>
+  {{end}}
+
+  {{if .Archived}}
+  <h2>Archived</h2>
+  <p class="muted">Offline for everyone. The files and settings stay.</p>
+  <section class="card list">
+    {{range .Archived}}{{template "site" (site $ .)}}{{end}}
+  </section>
+  {{end}}
 
   <section class="card setting">
     <div>
@@ -34,3 +50,35 @@
   </section>
 </main>
 {{end}}
+
+{{define "site"}}{{$csrf := .CSRF}}{{with .Site}}
+<div class="site">
+  <div class="site-info">
+    <a class="site-path" href="{{$.FilesURL}}{{.URL}}">/{{.Path}}</a>
+    <span class="badge {{if eq .Visibility "public"}}badge-public{{end}}">{{if eq .Visibility "public"}}Public{{else}}Private{{end}}</span>
+    <span class="muted small">{{if eq .Kind "file"}}{{.File}} · {{end}}{{.UpdatedAt.UTC.Format "2 Jan 2006, 15:04"}} UTC</span>
+  </div>
+  <div class="site-actions">
+    {{if eq .Visibility "public"}}
+    <form method="post" action="/sites/{{.Path}}/private"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make private</button></form>
+    {{else}}
+    <form method="post" action="/sites/{{.Path}}/public"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make public</button></form>
+    {{end}}
+    {{if .Archived}}
+    <form method="post" action="/sites/{{.Path}}/unarchive"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Unarchive</button></form>
+    {{else}}
+    <form method="post" action="/sites/{{.Path}}/archive"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Archive</button></form>
+    {{end}}
+    <details class="delete">
+      <summary class="btn btn-ghost btn-small">Delete</summary>
+      <form method="post" action="/sites/{{.Path}}/delete">
+        <input type="hidden" name="csrf" value="{{$csrf}}">
+        <label>Type <strong>{{.Path}}</strong> to delete it for ever
+          <input name="confirm" autocomplete="off" required pattern="{{.Path}}">
+        </label>
+        <button class="btn btn-danger btn-small">Delete</button>
+      </form>
+    </details>
+  </div>
+</div>
+{{end}}{{end}}

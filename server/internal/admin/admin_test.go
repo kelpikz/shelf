@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kelpikz/shelf/server/internal/auth"
+	"github.com/kelpikz/shelf/server/internal/sites"
 	"github.com/kelpikz/shelf/server/internal/store"
 )
 
@@ -38,14 +39,17 @@ func (f *fakeGitHub) Finish(_ context.Context, code, verifier string) (auth.Iden
 	return f.id, nil
 }
 
+const filesURL = "https://files.example.com"
+
 func newApp(t *testing.T, id auth.Identity) http.Handler {
 	t.Helper()
-	db, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	db, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return New(owner, 1, adminURL, &fakeGitHub{id: id}, auth.NewSessions(db)).Handler()
+	return New(owner, 1, adminURL, filesURL, &fakeGitHub{id: id}, auth.NewSessions(db), sites.New(db, dir)).Handler()
 }
 
 var ownerID = auth.Identity{ID: 1, Login: "ajitha", Emails: []auth.Email{{Address: owner, Verified: true}}}
@@ -250,13 +254,14 @@ func fromSite(r *http.Request) *http.Request {
 }
 
 func TestOnlyPageVisitsRenew(t *testing.T) {
-	db, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	db, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
 	sessions := auth.NewSessions(db)
-	h := New(owner, 1, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
+	h := New(owner, 1, adminURL, filesURL, &fakeGitHub{id: ownerID}, sessions, sites.New(db, dir)).Handler()
 	sess := cookie(login(t, h, ""), sessionCookie)
 
 	later := time.Now().Add(2 * 24 * time.Hour)

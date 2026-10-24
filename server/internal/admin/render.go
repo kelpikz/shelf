@@ -6,15 +6,24 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+
+	"github.com/kelpikz/shelf/server/internal/auth"
+	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
 //go:embed templates static
 var files embed.FS
 
 func loadPages() map[string]*template.Template {
+	funcs := template.FuncMap{
+		// site gives the "site" template one Site and what its forms need.
+		"site": func(page map[string]any, site sites.Site) map[string]any {
+			return map[string]any{"Site": site, "FilesURL": page["FilesURL"], "CSRF": page["Session"].(auth.Session).CSRF}
+		},
+	}
 	pages := map[string]*template.Template{}
 	for _, name := range []string{"login.html", "thanks.html", "sites.html"} {
-		pages[name] = template.Must(template.ParseFS(files, "templates/base.html", "templates/"+name))
+		pages[name] = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/base.html", "templates/"+name))
 	}
 	return pages
 }

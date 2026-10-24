@@ -18,6 +18,7 @@ func TestLoadChecksValues(t *testing.T) {
 		{"no scheme", "files-admin.example.com", "owner@example.com", false},
 		{"non-ASCII email", "https://files-admin.example.com", "owner@exampl" + string(rune(0x212A)) + ".com", false},
 		{"not an email", "https://files-admin.example.com", "owner", false},
+		{"same host as FILES_URL", "https://Files.example.com", "owner@example.com", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -26,6 +27,7 @@ func TestLoadChecksValues(t *testing.T) {
 			t.Setenv("GITHUB_CLIENT_ID", "id")
 			t.Setenv("GITHUB_CLIENT_SECRET", "secret")
 			t.Setenv("ADMIN_URL", tt.adminURL)
+			t.Setenv("FILES_URL", "https://files.example.com")
 			_, err := Load()
 			if (err == nil) != tt.ok {
 				t.Errorf("Load() error = %v, want ok = %v", err, tt.ok)
@@ -42,6 +44,7 @@ func TestLoadChecksOwnerGitHubID(t *testing.T) {
 			t.Setenv("GITHUB_CLIENT_ID", "id")
 			t.Setenv("GITHUB_CLIENT_SECRET", "secret")
 			t.Setenv("ADMIN_URL", "https://files-admin.example.com")
+			t.Setenv("FILES_URL", "https://files.example.com")
 			c, err := Load()
 			if (err == nil) != ok {
 				t.Fatalf("Load() error = %v, want ok = %v", err, ok)

@@ -1,4 +1,5 @@
-// Package admin is the Admin page: login, logout, and the list of Sites.
+// Package admin is the Admin page: login, logout, and the list of Sites with
+// their actions.
 package admin
 
 import (
@@ -8,20 +9,26 @@ import (
 	"net/http"
 
 	"github.com/kelpikz/shelf/server/internal/auth"
+	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
 type App struct {
 	OwnerEmail    string
 	OwnerGitHubID int64
 	AdminURL      string // origin of the admin host, for the Origin check
+	FilesURL      string // origin of the Sites host, for the links to Sites
 	Provider      auth.Provider
 	Sessions      *auth.Sessions
+	Sites         *sites.Sites
 
 	pages map[string]*template.Template
 }
 
-func New(ownerEmail string, ownerGitHubID int64, adminURL string, p auth.Provider, s *auth.Sessions) *App {
-	return &App{OwnerEmail: ownerEmail, OwnerGitHubID: ownerGitHubID, AdminURL: adminURL, Provider: p, Sessions: s, pages: loadPages()}
+func New(ownerEmail string, ownerGitHubID int64, adminURL, filesURL string, p auth.Provider, s *auth.Sessions, st *sites.Sites) *App {
+	return &App{
+		OwnerEmail: ownerEmail, OwnerGitHubID: ownerGitHubID, AdminURL: adminURL, FilesURL: filesURL,
+		Provider: p, Sessions: s, Sites: st, pages: loadPages(),
+	}
 }
 
 func (a *App) Handler() http.Handler {
@@ -34,6 +41,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/github/callback", a.finishLogin)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("POST /logout-all", a.logoutAll)
+	mux.HandleFunc("POST /sites/{path}/{action}", a.siteAction)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
@@ -55,5 +63,23 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 			setSessionCookie(w, c.Value, sess.ExpiresAt)
 		}
 	}
-	a.render(w, http.StatusOK, "sites.html", map[string]any{"Session": sess})
+
+	// TODO: add paginaton
+	all, err := a.Sites.List(r.Context())
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	var live, archived []sites.Site
+	for _, site := range all {
+		if site.Archived {
+			archived = append(archived, site)
+		} else {
+			live = append(live, site)
+		}
+	}
+	a.render(w, http.StatusOK, "sites.html", map[string]any{
+		"Session": sess, "Sites": live, "Archived": archived, "FilesURL": a.FilesURL,
+		"Error": siteErrors[r.URL.Query().Get("error")],
+	})
 }

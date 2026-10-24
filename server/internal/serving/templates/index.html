@@ -1,0 +1,16 @@
+{{define "title"}}shelf{{end}}
+
+{{define "content"}}
+<section class="card">
+  <h1>Sites</h1>
+  {{if .Sites}}
+  <ul class="sites">
+    {{range .Sites}}
+    <li><a href="{{.URL}}">{{.Path}}</a> <time datetime="{{.UpdatedAt.UTC.Format "2006-01-02"}}">{{.UpdatedAt.UTC.Format "2 Jan 2006"}}</time></li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted">No public Sites yet.</p>
+  {{end}}
+</section>
+{{end}}
