@@ -568,3 +568,26 @@ func TestOwnerCancelsCLIKey(t *testing.T) {
 		t.Fatal("key works after cancel")
 	}
 }
+
+func TestAPIRefusesBadJSON(t *testing.T) {
+	ts := newServer(t)
+	for name, payload := range map[string]string{
+		"trailing text": `{"device_name":"a"} junk`,
+		"two objects":   `{"device_name":"a"}{"device_name":"b"}`,
+		"too large":     `{"device_name":"a"}` + strings.Repeat(" ", 8<<10),
+	} {
+		r := httptest.NewRequest("POST", adminURL+"/api/v1/cli/login", strings.NewReader(payload))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		ts.h.ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d", name, w.Code)
+		}
+	}
+	// No bad request may take one of the open login slots.
+	for i := 0; i < ts.cli.MaxOpen; i++ {
+		if _, err := ts.cli.StartLogin(context.Background(), "laptop", ""); err != nil {
+			t.Fatalf("login %d: %v", i+1, err)
+		}
+	}
+}

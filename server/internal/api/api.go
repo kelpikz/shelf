@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"mime"
 	"net"
@@ -124,7 +125,13 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		writeError(w, http.StatusUnsupportedMediaType, "bad_request", "Send JSON.")
 		return false
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v); err != nil {
+	// ReadAll then Unmarshal: Unmarshal refuses data after the first value, and
+	// the whole body must fit in maxBody.
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err == nil {
+		err = json.Unmarshal(b, v)
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "The JSON body is not valid.")
 		return false
 	}
