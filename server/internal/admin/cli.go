@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/kelpikz/shelf/server/internal/auth"
 )
@@ -65,4 +66,21 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, http.StatusOK, "cli.html", page)
+}
+
+// revokeKey cancels one CLI key from the "CLI keys" list.
+func (a *App) revokeKey(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.checkPost(w, r); !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := a.CLI.Revoke(r.Context(), id); err != nil {
+		a.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

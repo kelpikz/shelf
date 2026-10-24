@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -544,5 +545,26 @@ func TestCLIApprovalNeedsOwnerSession(t *testing.T) {
 
 	if s, _, _ := ts.cli.Poll(context.Background(), login.DeviceCode); s != auth.PollWait {
 		t.Errorf("login was approved: %q", s)
+	}
+}
+
+func TestOwnerCancelsCLIKey(t *testing.T) {
+	ts := newServer(t)
+	ctx := context.Background()
+	login, _ := ts.cli.StartLogin(ctx, "work-pc", "")
+	ts.cli.Approve(ctx, login.UserCode)
+	_, key, _ := ts.cli.Poll(ctx, login.DeviceCode)
+	k, _, _ := ts.cli.CheckKey(ctx, key)
+	c, csrf := ts.login(t)
+
+	if page := body(ts.adminGet(c, "/")); !strings.Contains(page, "work-pc") {
+		t.Fatal("the key is not on the Admin page")
+	}
+	resp := ts.adminPost(c, adminURL, "/cli/keys/"+strconv.FormatInt(k.ID, 10)+"/revoke", url.Values{"csrf": {csrf}})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("revoke: got %d", resp.StatusCode)
+	}
+	if _, ok, _ := ts.cli.CheckKey(ctx, key); ok {
+		t.Fatal("key works after cancel")
 	}
 }
