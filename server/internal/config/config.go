@@ -39,7 +39,7 @@ func Load() (Config, error) {
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		AdminURL:           strings.TrimSuffix(os.Getenv("ADMIN_URL"), "/"),
-		DataDir:            envOr("DATA_DIR", "data"),
+		DataDir:            dataDir(),
 		Port:               envOr("PORT", "8080"),
 	}
 
@@ -84,6 +84,17 @@ func Load() (Config, error) {
 
 	return c, nil
 }
+
+// LoadDataDir reads only DATA_DIR. The recovery tools in cmd/ use it, so
+// they work without the GitHub secrets.
+func LoadDataDir() (string, error) {
+	if err := loadDotEnv(".env"); err != nil {
+		return "", err
+	}
+	return dataDir(), nil
+}
+
+func dataDir() string { return envOr("DATA_DIR", "data") }
 
 func envOr(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
