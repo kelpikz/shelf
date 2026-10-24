@@ -2,31 +2,37 @@
 
 {{define "content"}}
 <main class="center">
-  <section class="card login">
-    <div class="brand">{{template "logo"}}<span>shelf</span></div>
+  <section class="card login cli">
+    <div class="brand">{{template "logo"}}<span>shelf</span><span class="tag">CLI</span></div>
 
     {{if eq .Step "done"}}
+    <div class="done-mark" aria-hidden="true">{{if .Approved}}✓{{else}}✕{{end}}</div>
     <h1>{{if .Approved}}CLI approved{{else}}CLI denied{{end}}</h1>
-    <p class="muted">You can close this tab and go back to the terminal.</p>
+    <p class="muted">{{if .Approved}}Go back to the terminal. The CLI is logged in.{{else}}The CLI did not get a key.{{end}} You can close this tab.</p>
     <a class="btn btn-ghost" href="/">Back to Sites</a>
 
     {{else if eq .Step "confirm"}}{{with .Login}}
     <h1>Approve this CLI?</h1>
     <p class="muted">It gets a key that can manage your Sites for 30 days.</p>
-    <p>Code <strong>{{.UserCode}}</strong><br>
-      Device <strong>{{.DeviceName}}</strong><br>
-      <span class="muted small">IP {{.IP}} · started {{.CreatedAt.UTC.Format "15:04:05"}} UTC</span></p>
+    <div class="code-show">{{.UserCode}}</div>
+    <dl class="facts">
+      <dt>Device</dt><dd>{{.DeviceName}}</dd>
+      <dt>IP</dt><dd>{{.IP}}</dd>
+      <dt>Started</dt><dd>{{.CreatedAt.UTC.Format "15:04:05"}} UTC</dd>
+    </dl>
+    <div class="choice">
+      <form method="post" action="/cli/approve/deny">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="code" value="{{.UserCode}}">
+        <button class="btn btn-ghost">Deny</button>
+      </form>
+      <form method="post" action="/cli/approve/approve">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="code" value="{{.UserCode}}">
+        <button class="btn btn-github">Approve</button>
+      </form>
+    </div>
     <p class="fine">Approve only if you started this login and the code matches your terminal.</p>
-    <form method="post" action="/cli/approve/approve">
-      <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <input type="hidden" name="code" value="{{.UserCode}}">
-      <button class="btn btn-github">Approve</button>
-    </form>
-    <form method="post" action="/cli/approve/deny">
-      <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <input type="hidden" name="code" value="{{.UserCode}}">
-      <button class="btn btn-ghost">Deny</button>
-    </form>
     {{end}}
 
     {{else}}
@@ -35,9 +41,12 @@
     {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
     <form method="post" action="/cli/approve/check">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label>Code <input name="code" autocomplete="off" autocapitalize="characters" required autofocus></label>
+      <label class="field-label" for="code">Code</label>
+      <input class="code-input" id="code" name="code" placeholder="XXXX-XXXX" maxlength="9"
+        autocomplete="off" autocapitalize="characters" spellcheck="false" required autofocus>
       <button class="btn btn-github">Continue</button>
     </form>
+    <script src="/static/cli.js" defer></script>
     {{end}}
   </section>
 </main>
