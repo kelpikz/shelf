@@ -487,8 +487,15 @@ func TestCLILoginOverAPI(t *testing.T) {
 	if got := poll(); got.Status != "wait" {
 		t.Fatalf("before approval: %+v", got)
 	}
-	if err := ts.cli.Approve(context.Background(), login.UserCode); err != nil {
-		t.Fatal(err)
+	// The Owner types the code on the approval page, checks the device, and approves.
+	c, csrf := ts.login(t)
+	resp = ts.adminPost(c, adminURL, "/cli/approve/check", url.Values{"csrf": {csrf}, "code": {login.UserCode}})
+	if page := body(resp); resp.StatusCode != http.StatusOK || !strings.Contains(page, "laptop") {
+		t.Fatalf("check: got %d, device name missing", resp.StatusCode)
+	}
+	resp = ts.adminPost(c, adminURL, "/cli/approve/approve", url.Values{"csrf": {csrf}, "code": {login.UserCode}})
+	if page := body(resp); resp.StatusCode != http.StatusOK || !strings.Contains(page, "CLI approved") {
+		t.Fatalf("approve: got %d", resp.StatusCode)
 	}
 	got := poll()
 	if got.Status != "approved" || got.Key == "" {
@@ -512,5 +519,30 @@ func TestAPIRefusesSessionCookie(t *testing.T) {
 	ts.h.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `"code":"unauthorized"`) {
 		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}
+
+func TestCLIApprovalNeedsOwnerSession(t *testing.T) {
+	ts := newServer(t)
+	login, _ := ts.cli.StartLogin(context.Background(), "laptop", "")
+	form := url.Values{"code": {login.UserCode}}
+
+	r := httptest.NewRequest("POST", adminURL+"/cli/approve/approve", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", adminURL)
+	w := httptest.NewRecorder()
+	ts.h.ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" {
+		t.Errorf("no session: got %d to %q", w.Code, w.Header().Get("Location"))
+	}
+
+	c, csrf := ts.login(t)
+	form.Set("csrf", csrf)
+	if resp := ts.adminPost(c, filesURL, "/cli/approve/approve", form); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("other origin: got %d", resp.StatusCode)
+	}
+
+	if s, _, _ := ts.cli.Poll(context.Background(), login.DeviceCode); s != auth.PollWait {
+		t.Errorf("login was approved: %q", s)
 	}
 }

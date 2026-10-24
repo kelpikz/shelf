@@ -134,19 +134,47 @@ func (c *CLI) Deny(ctx context.Context, userCode string) error {
 	return c.decide(ctx, userCode, "denied")
 }
 
+// PendingLogin is an open login, for the approval page.
+type PendingLogin struct {
+	UserCode   string // "XXXX-XXXX"
+	DeviceName string
+	IP         string
+	CreatedAt  time.Time
+}
+
+// Find gives the pending login for a user code. A wrong code counts as a
+// wrong try, the same as in Approve and Deny.
+func (c *CLI) Find(ctx context.Context, userCode string) (PendingLogin, error) {
+	now := c.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tooManyTries(now) {
+		return PendingLogin{}, ErrTooManyTries
+	}
+
+	code := normalizeUserCode(userCode)
+	var p PendingLogin
+	var created int64
+	err := c.db.QueryRowContext(ctx,
+		`SELECT device_name, ip, created_at FROM cli_logins WHERE user_code = ? AND status = 'pending' AND expires_at > ?`,
+		code, now.Unix()).Scan(&p.DeviceName, &p.IP, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		c.failures = append(c.failures, now)
+		return PendingLogin{}, ErrBadCode
+	}
+	if err != nil {
+		return PendingLogin{}, err
+	}
+	p.UserCode = code[:4] + "-" + code[4:]
+	p.CreatedAt = time.Unix(created, 0)
+	return p, nil
+}
+
 func (c *CLI) decide(ctx context.Context, userCode, status string) error {
 	now := c.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	kept := c.failures[:0]
-	for _, f := range c.failures {
-		if now.Sub(f) < c.TriesWindow {
-			kept = append(kept, f)
-		}
-	}
-	c.failures = kept
-	if len(c.failures) >= c.MaxTries {
+	if c.tooManyTries(now) {
 		return ErrTooManyTries
 	}
 
@@ -163,6 +191,18 @@ func (c *CLI) decide(ctx context.Context, userCode, status string) error {
 		return ErrBadCode
 	}
 	return nil
+}
+
+// tooManyTries drops wrong tries older than TriesWindow. c.mu must be held.
+func (c *CLI) tooManyTries(now time.Time) bool {
+	kept := c.failures[:0]
+	for _, f := range c.failures {
+		if now.Sub(f) < c.TriesWindow {
+			kept = append(kept, f)
+		}
+	}
+	c.failures = kept
+	return len(c.failures) >= c.MaxTries
 }
 
 // Poll is the CLI asking about its login. On PollApproved it gives the key.
