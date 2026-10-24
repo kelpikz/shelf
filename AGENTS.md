@@ -45,6 +45,9 @@ Building v1. The server has the GitHub login and the Admin page sessions. The Si
 
 At the end of each session, write a short note in `.scratch/sessionNotes/YYYY-MM-DD-<short-slug>.md`. Write what you did and what comes next.
 
+## Development Rules
+- Future schema changes must use migrations. Create a data backup first. If the backup fails, stop. Only then change the tables and rows.
+
 ## Commits
 
 - Keep the message short. Start it with `feat:`, `fix:`, `chore:`, or `doc:`.

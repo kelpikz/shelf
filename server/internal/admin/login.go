@@ -84,7 +84,8 @@ func (a *App) finishLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	token, sess, err := a.Sessions.Create(r.Context(), id)
+	profile := auth.OwnerProfile{DisplayName: "@" + id.Login, AvatarURL: id.AvatarURL}
+	token, sess, err := a.Sessions.Create(r.Context(), profile)
 	if err != nil {
 		a.serverError(w, err)
 		return

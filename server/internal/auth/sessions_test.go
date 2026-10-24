@@ -10,6 +10,26 @@ import (
 
 const day = 24 * time.Hour
 
+func TestSessionStoresOwnerProfile(t *testing.T) {
+	s, _ := newSessions(t)
+	ctx := context.Background()
+	profile := OwnerProfile{DisplayName: "Ajitha Prasad", AvatarURL: "https://avatars.example.com/owner.png"}
+	token, created, err := s.Create(ctx, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Get(ctx, token)
+	if err != nil || !ok {
+		t.Fatalf("Get: found=%v, err=%v", ok, err)
+	}
+	if got.Profile != profile {
+		t.Errorf("profile = %+v, want %+v", got.Profile, profile)
+	}
+	if token == "" || got.CSRF == "" || got.CSRF != created.CSRF {
+		t.Error("session token or CSRF token is missing or changed")
+	}
+}
+
 // newSessions gives a store with a clock that the test moves.
 func newSessions(t *testing.T) (*Sessions, *time.Time) {
 	t.Helper()
@@ -44,7 +64,7 @@ func visit(t *testing.T, s *Sessions, token string) (Session, bool) {
 
 func TestSessionEndsAfterIdleTime(t *testing.T) {
 	s, now := newSessions(t)
-	token, _, _ := s.Create(context.Background(), Identity{ID: 1})
+	token, _, _ := s.Create(context.Background(), OwnerProfile{})
 
 	*now = now.Add(30*day - time.Second)
 	if _, ok := visit(t, s, token); !ok {
@@ -59,7 +79,7 @@ func TestSessionEndsAfterIdleTime(t *testing.T) {
 
 func TestUseKeepsSessionUntilMaxTime(t *testing.T) {
 	s, now := newSessions(t)
-	token, created, _ := s.Create(context.Background(), Identity{ID: 1})
+	token, created, _ := s.Create(context.Background(), OwnerProfile{})
 
 	// Use the page every 20 days. Each visit moves the idle deadline.
 	for i := 0; i < 4; i++ {
@@ -83,7 +103,7 @@ func TestUseKeepsSessionUntilMaxTime(t *testing.T) {
 func TestRenewAtMostOnceADay(t *testing.T) {
 	s, now := newSessions(t)
 	ctx := context.Background()
-	token, _, _ := s.Create(ctx, Identity{ID: 1})
+	token, _, _ := s.Create(ctx, OwnerProfile{})
 
 	*now = now.Add(23 * time.Hour)
 	sess, _, _ := s.Get(ctx, token)
@@ -110,7 +130,7 @@ func TestRenewAtMostOnceADay(t *testing.T) {
 func TestRenewDoesNotBringBackDeletedSession(t *testing.T) {
 	s, now := newSessions(t)
 	ctx := context.Background()
-	token, _, _ := s.Create(ctx, Identity{ID: 1})
+	token, _, _ := s.Create(ctx, OwnerProfile{})
 
 	*now = now.Add(2 * day)
 	sess, _, _ := s.Get(ctx, token)
@@ -128,8 +148,8 @@ func TestRenewDoesNotBringBackDeletedSession(t *testing.T) {
 func TestDeleteAll(t *testing.T) {
 	s, _ := newSessions(t)
 	ctx := context.Background()
-	a, _, _ := s.Create(ctx, Identity{ID: 1})
-	b, _, _ := s.Create(ctx, Identity{ID: 1})
+	a, _, _ := s.Create(ctx, OwnerProfile{})
+	b, _, _ := s.Create(ctx, OwnerProfile{})
 
 	if n, err := s.DeleteAll(ctx); err != nil || n != 2 {
 		t.Fatalf("DeleteAll: %d, %v", n, err)
