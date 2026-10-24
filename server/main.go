@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"time"
@@ -25,10 +26,8 @@ func main() {
 	}
 	defer db.Close()
 
-	allSites := sites.New(db, cfg.DataDir)
-
-	// TODO: this should be a backgroun job
-	if err := allSites.Cleanup(context.Background()); err != nil {
+	allSites, err := prepareSites(context.Background(), db, cfg.DataDir)
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -45,4 +44,13 @@ func main() {
 	}
 	log.Printf("shelf server listening on %s (sites: %s, admin: %s)", srv.Addr, cfg.FilesURL, cfg.AdminURL)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func prepareSites(ctx context.Context, db *sql.DB, dataDir string) (*sites.Sites, error) {
+	allSites := sites.New(db, dataDir)
+	// Cleanup must finish before uploads can start.
+	if err := allSites.Cleanup(ctx); err != nil {
+		return nil, err
+	}
+	return allSites, nil
 }

@@ -6,7 +6,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Kind string
@@ -131,7 +132,7 @@ func (s *Sites) Publish(ctx context.Context, path string, kind Kind, tarGz io.Re
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return Site{}, err
 	}
-	folder := path + "-" + rand.Text()
+	folder := path + "-" + uuid.NewString()
 	file, err := s.unpack(filepath.Join(s.dir, folder), kind, tarGz)
 	if err != nil {
 		os.RemoveAll(filepath.Join(s.dir, folder))
