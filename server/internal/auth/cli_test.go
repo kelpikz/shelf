@@ -180,6 +180,21 @@ func TestRevokedKeyRefused(t *testing.T) {
 	}
 }
 
+// A stale Cancel form sends the ID of a key that is already gone. It must not
+// hit a newer key.
+func TestRevokedIDIsNotReused(t *testing.T) {
+	c, _ := newCLI(t)
+	ctx := context.Background()
+	old, _, _ := c.CheckKey(ctx, approvedKey(t, c))
+	c.Revoke(ctx, old.ID)
+
+	key := approvedKey(t, c)
+	c.Revoke(ctx, old.ID)
+	if _, ok, _ := c.CheckKey(ctx, key); !ok {
+		t.Fatal("revoking the old ID cancelled the new key")
+	}
+}
+
 func TestMaxOpenLoginsUnderParallelStarts(t *testing.T) {
 	c, _ := newCLI(t)
 	var wg sync.WaitGroup

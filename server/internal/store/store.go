@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS cli_logins (
 );
 
 CREATE TABLE IF NOT EXISTS cli_keys (
-	id           INTEGER PRIMARY KEY,
+	id           INTEGER PRIMARY KEY AUTOINCREMENT, -- never reused: a stale Cancel form must not hit a newer key
 	key_hash     TEXT NOT NULL UNIQUE,
 	device_name  TEXT NOT NULL,
 	created_at   INTEGER NOT NULL,
