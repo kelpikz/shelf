@@ -67,7 +67,8 @@ type CLI struct {
 	mu       sync.Mutex
 	failures []time.Time // wrong codes; one Owner, so one global counter
 
-	pollMu sync.Mutex // one Poll at a time, so one approval gives one key
+	pollMu  sync.Mutex // one Poll at a time, so one approval gives one key
+	startMu sync.Mutex // one StartLogin at a time, so the count holds until the insert
 }
 
 func NewCLI(db *sql.DB) *CLI {
@@ -87,6 +88,9 @@ func NewCLI(db *sql.DB) *CLI {
 // StartLogin opens a login. deviceName and ip are untrusted; they are only
 // shown to the Owner on the approval page.
 func (c *CLI) StartLogin(ctx context.Context, deviceName, ip string) (Login, error) {
+	c.startMu.Lock()
+	defer c.startMu.Unlock()
+
 	now := c.Now().Unix()
 	if _, err := c.db.ExecContext(ctx, `DELETE FROM cli_logins WHERE expires_at <= ?`, now); err != nil {
 		return Login{}, err

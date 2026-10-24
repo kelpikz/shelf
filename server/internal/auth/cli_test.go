@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,6 +177,28 @@ func TestRevokedKeyRefused(t *testing.T) {
 	}
 	if keys, _ := c.Keys(ctx); len(keys) != 1 || keys[0].ID == ka.ID {
 		t.Errorf("Keys after revoke: %+v", keys)
+	}
+}
+
+func TestMaxOpenLoginsUnderParallelStarts(t *testing.T) {
+	c, _ := newCLI(t)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	started := 0
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := c.StartLogin(context.Background(), "laptop", ""); err == nil {
+				mu.Lock()
+				started++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if started != c.MaxOpen {
+		t.Fatalf("%d logins started, want %d", started, c.MaxOpen)
 	}
 }
 
