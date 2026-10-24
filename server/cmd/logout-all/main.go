@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/kelpikz/shelf/server/internal/access"
+	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/config"
 	"github.com/kelpikz/shelf/server/internal/store"
 )
@@ -23,7 +23,7 @@ func main() {
 	}
 	defer db.Close()
 
-	n, err := access.NewSessions(db).DeleteAll(context.Background())
+	n, err := auth.NewSessions(db).DeleteAll(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-package access
+package auth
 
 import (
 	"context"
@@ -10,12 +10,17 @@ import (
 	"time"
 )
 
+// OwnerProfile is display information for an Owner who has passed the login check.
+// It contains no provider account ID and is not proof of ownership.
+type OwnerProfile struct {
+	DisplayName string
+	AvatarURL   string
+}
+
 // Session is a logged-in Owner on the Admin page.
 type Session struct {
 	CSRF      string
-	GitHubID  int64
-	Login     string
-	AvatarURL string
+	Profile   OwnerProfile
 	CreatedAt time.Time
 	RenewedAt time.Time
 	// ExpiresAt is the idle deadline. It is never later than MaxExpiresAt.
@@ -47,7 +52,8 @@ func NewSessions(db *sql.DB) *Sessions {
 }
 
 // Create makes a session and gives the token for the cookie.
-func (s *Sessions) Create(ctx context.Context, id Identity) (string, Session, error) {
+// The caller must check that the person is the Owner before calling Create.
+func (s *Sessions) Create(ctx context.Context, profile OwnerProfile) (string, Session, error) {
 	now := s.Now()
 	// Expired rows cannot log anyone in. This only keeps the table small, so
 	// a failure must not stop the login.
@@ -59,18 +65,16 @@ func (s *Sessions) Create(ctx context.Context, id Identity) (string, Session, er
 	token := RandomToken()
 	sess := Session{
 		CSRF:         RandomToken(),
-		GitHubID:     id.ID,
-		Login:        id.Login,
-		AvatarURL:    id.AvatarURL,
+		Profile:      profile,
 		CreatedAt:    now,
 		RenewedAt:    now,
 		MaxExpiresAt: now.Add(s.MaxTTL),
 	}
 	sess.ExpiresAt = earlier(now.Add(s.IdleTTL), sess.MaxExpiresAt)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id_hash, csrf, github_id, login, avatar_url, created_at, renewed_at, idle_expires_at, max_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		hash(token), sess.CSRF, sess.GitHubID, sess.Login, sess.AvatarURL,
+		`INSERT INTO sessions (id_hash, csrf, display_name, avatar_url, created_at, renewed_at, idle_expires_at, max_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		hash(token), sess.CSRF, sess.Profile.DisplayName, sess.Profile.AvatarURL,
 		sess.CreatedAt.Unix(), sess.RenewedAt.Unix(), sess.ExpiresAt.Unix(), sess.MaxExpiresAt.Unix())
 	if err != nil {
 		return "", Session{}, err
@@ -87,10 +91,10 @@ func (s *Sessions) Get(ctx context.Context, token string) (Session, bool, error)
 	var sess Session
 	var created, renewed, idle, max int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT csrf, github_id, login, avatar_url, created_at, renewed_at, idle_expires_at, max_expires_at
+		`SELECT csrf, display_name, avatar_url, created_at, renewed_at, idle_expires_at, max_expires_at
 		 FROM sessions WHERE id_hash = ? AND idle_expires_at > ? AND max_expires_at > ?`,
 		hash(token), now, now,
-	).Scan(&sess.CSRF, &sess.GitHubID, &sess.Login, &sess.AvatarURL, &created, &renewed, &idle, &max)
+	).Scan(&sess.CSRF, &sess.Profile.DisplayName, &sess.Profile.AvatarURL, &created, &renewed, &idle, &max)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, false, nil
 	}

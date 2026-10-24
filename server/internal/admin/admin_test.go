@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kelpikz/shelf/server/internal/access"
+	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/store"
 )
 
@@ -22,7 +22,7 @@ const (
 
 // fakeGitHub gives back a fixed identity and checks the PKCE verifier.
 type fakeGitHub struct {
-	id       access.Identity
+	id       auth.Identity
 	verifier string
 }
 
@@ -31,24 +31,24 @@ func (f *fakeGitHub) LoginURL(state, verifier string) string {
 	return "https://github.example/authorize?state=" + url.QueryEscape(state)
 }
 
-func (f *fakeGitHub) Finish(_ context.Context, code, verifier string) (access.Identity, error) {
+func (f *fakeGitHub) Finish(_ context.Context, code, verifier string) (auth.Identity, error) {
 	if verifier != f.verifier {
-		return access.Identity{}, context.Canceled
+		return auth.Identity{}, context.Canceled
 	}
 	return f.id, nil
 }
 
-func newApp(t *testing.T, id access.Identity) http.Handler {
+func newApp(t *testing.T, id auth.Identity) http.Handler {
 	t.Helper()
 	db, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return New(owner, 1, adminURL, &fakeGitHub{id: id}, access.NewSessions(db)).Handler()
+	return New(owner, 1, adminURL, &fakeGitHub{id: id}, auth.NewSessions(db)).Handler()
 }
 
-var ownerID = access.Identity{ID: 1, Login: "ajitha", Emails: []access.Email{{Address: owner, Verified: true}}}
+var ownerID = auth.Identity{ID: 1, Login: "ajitha", Emails: []auth.Email{{Address: owner, Verified: true}}}
 
 func do(h http.Handler, r *http.Request) *http.Response {
 	w := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func TestOwnerLogsIn(t *testing.T) {
 }
 
 func TestUnverifiedEmailGetsThanks(t *testing.T) {
-	stranger := access.Identity{ID: 1, Login: "stranger", Emails: []access.Email{{Address: owner, Verified: false}}}
+	stranger := auth.Identity{ID: 1, Login: "stranger", Emails: []auth.Email{{Address: owner, Verified: false}}}
 	resp := login(t, newApp(t, stranger), "")
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(readBody(resp), "Thanks") {
 		t.Fatalf("got %d", resp.StatusCode)
@@ -129,7 +129,7 @@ func TestUnverifiedEmailGetsThanks(t *testing.T) {
 }
 
 func TestOtherAccountWithOwnerEmailGetsThanks(t *testing.T) {
-	stranger := access.Identity{ID: 2, Login: "stranger", Emails: []access.Email{{Address: owner, Verified: true}}}
+	stranger := auth.Identity{ID: 2, Login: "stranger", Emails: []auth.Email{{Address: owner, Verified: true}}}
 	resp := login(t, newApp(t, stranger), "")
 	if resp.StatusCode != http.StatusForbidden || cookie(resp, sessionCookie) != nil {
 		t.Fatalf("got %d and a session cookie", resp.StatusCode)
@@ -255,7 +255,7 @@ func TestOnlyPageVisitsRenew(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	sessions := access.NewSessions(db)
+	sessions := auth.NewSessions(db)
 	h := New(owner, 1, adminURL, &fakeGitHub{id: ownerID}, sessions).Handler()
 	sess := cookie(login(t, h, ""), sessionCookie)
 

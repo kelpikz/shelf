@@ -1,16 +1,38 @@
-// Package access holds the login rules: who the Owner is, sessions, and the
-// checks that stop other sites from acting as the Owner.
-package access
+// Package auth identifies the Owner and manages login sessions.
+package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"net/http"
 	"strings"
 
 	"github.com/kelpikz/shelf/server/internal/utils"
 )
+
+// Identity is what a login provider tells us about the person.
+type Identity struct {
+	ID        int64
+	Login     string
+	AvatarURL string
+	Emails    []Email
+}
+
+type Email struct {
+	Address  string
+	Verified bool
+}
+
+// Provider is the seam for a login provider. GitHub is the only one in v1.
+// Tests use a fake, and Google can be a second adapter later.
+type Provider interface {
+	// LoginURL is the address that starts the login. The verifier is the
+	// PKCE secret; only its S256 hash goes in the URL.
+	LoginURL(state, verifier string) string
+	// Finish swaps the code from the callback for the person's identity.
+	Finish(ctx context.Context, code, verifier string) (Identity, error)
+}
 
 // IsOwner is true only when the identity is the GitHub account ownerID and it
 // has ownerEmail, which GitHub marks verified. GitHub lets anyone add an email
@@ -29,32 +51,6 @@ func IsOwner(id Identity, ownerEmail string, ownerID int64) bool {
 		}
 	}
 	return false
-}
-
-// IsPageVisit is true when the person opens the page in the browser tab. It
-// is false for requests that a page on the Sites host makes, for example an
-// <img> or an <iframe> that points at the admin host. Browsers without
-// Sec-Fetch headers count as a page visit.
-func IsPageVisit(r *http.Request) bool {
-	h := r.Header
-	if h.Get("Sec-Fetch-Site") == "" && h.Get("Sec-Fetch-Mode") == "" {
-		return true
-	}
-	return h.Get("Sec-Fetch-Mode") == "navigate" &&
-		h.Get("Sec-Fetch-Dest") == "document" &&
-		h.Get("Sec-Fetch-Site") != "same-site"
-}
-
-// SameOrigin is true when a state-changing request comes from the Admin page
-// itself. The browser sets Origin and Sec-Fetch-Site, and scripts cannot
-// change them. SameSite cookies do not help here, because the Sites host and
-// the admin host are the same site.
-func SameOrigin(r *http.Request, adminOrigin string) bool {
-	if r.Header.Get("Origin") != adminOrigin {
-		return false
-	}
-	site := r.Header.Get("Sec-Fetch-Site")
-	return site == "" || site == "same-origin"
 }
 
 // Equal compares two secrets in constant time.

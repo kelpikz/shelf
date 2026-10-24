@@ -4,8 +4,8 @@
 <header class="topbar">
   <div class="brand">{{template "logo"}}<span>shelf</span><span class="tag">Admin</span></div>
   <div class="who">
-    {{with .Session.AvatarURL}}<img class="avatar" src="{{.}}" alt="" width="28" height="28">{{end}}
-    <span>@{{.Session.Login}}</span>
+    {{with .Session.Profile.AvatarURL}}<img class="avatar" src="{{.}}" alt="" width="28" height="28">{{end}}
+    <span>{{.Session.Profile.DisplayName}}</span>
     <form method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.Session.CSRF}}">
       <button class="btn btn-ghost btn-small" type="submit">Log out</button>

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kelpikz/shelf/server/internal/access"
 	"github.com/kelpikz/shelf/server/internal/admin"
+	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/config"
 	"github.com/kelpikz/shelf/server/internal/store"
 )
@@ -23,8 +23,8 @@ func main() {
 	}
 	defer db.Close()
 
-	github := access.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.AdminURL+"/auth/github/callback")
-	app := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, github, access.NewSessions(db))
+	github := auth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.AdminURL+"/auth/github/callback")
+	app := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, github, auth.NewSessions(db))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
