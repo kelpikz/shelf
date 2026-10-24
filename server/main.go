@@ -27,6 +27,7 @@ func main() {
 
 	allSites := sites.New(db, cfg.DataDir)
 
+	// TODO: this should be a backgroun job
 	if err := allSites.Cleanup(context.Background()); err != nil {
 		log.Fatal(err)
 	}

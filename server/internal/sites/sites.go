@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -65,7 +66,7 @@ type Sites struct {
 func New(db *sql.DB, dataDir string) *Sites {
 	return &Sites{
 		db: db, dir: filepath.Join(dataDir, "sites"), Now: time.Now,
-		MaxUpload: 100 << 20, MaxUnpacked: 500 << 20, MaxFiles: 10_000,
+		MaxUpload: 10 << 20, MaxUnpacked: 50 << 20, MaxFiles: 10_000,
 	}
 }
 
@@ -263,26 +264,45 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 	}
 	defer root.Close()
 
-	gz, err := gzip.NewReader(&limitReader{r: tarGz, n: s.MaxUpload})
+	gz, err := gzip.NewReader(&limitReader{r: tarGz, n: s.MaxUpload, msg: "the upload is too large"})
 	if err != nil {
 		if errors.Is(err, ErrBadUpload) {
 			return "", err
 		}
 		return "", badUpload("not a .tar.gz")
 	}
-	tr := tar.NewReader(gz)
+	// A small upload can unpack to a very large stream. Limit all of it: the
+	// files, the tar headers and padding, and the data after the tar end.
+	unpackedStream := &limitReader{
+		r: gz, n: s.MaxUnpacked + int64(s.MaxFiles+1)*tarOverhead,
+		msg: fmt.Sprintf("more than %d MB after unpacking", s.MaxUnpacked>>20),
+	}
+	tr := tar.NewReader(unpackedStream)
 	var names []string
 	var unpacked int64
 	// dirs holds each folder that the upload makes, also the parents that a
 	// file name like "a/b/c.txt" makes. Folders use disk space, so they
 	// count toward MaxFiles.
 	dirs := map[string]bool{}
+	tooMany := badUpload("more than %d files and folders", s.MaxFiles)
 	addDirs := func(dir string) error {
-		for ; dir != "."; dir = pathpkg.Dir(dir) {
+		// Each "/" makes one more folder. Check the depth first, so that a
+		// very deep name fails fast.
+		if dir != "." && len(names)+strings.Count(dir, "/")+1 > s.MaxFiles {
+			return tooMany
+		}
+		// The name is clean, so each parent is the part before a "/". When a
+		// folder is in dirs, its parents are in dirs too.
+		for dir != "." && !dirs[dir] {
 			dirs[dir] = true
+			i := strings.LastIndexByte(dir, '/')
+			if i < 0 {
+				break
+			}
+			dir = dir[:i]
 		}
 		if len(names)+len(dirs) > s.MaxFiles {
-			return badUpload("more than %d files and folders", s.MaxFiles)
+			return tooMany
 		}
 		return nil
 	}
@@ -320,13 +340,15 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 		}
 
 		names = append(names, name)
-		unpacked += h.Size
 		if err := addDirs(pathpkg.Dir(name)); err != nil {
 			return "", err
 		}
-		if h.Size < 0 || unpacked > s.MaxUnpacked {
+		// Compare with what is left, not the sum: a huge size makes the sum
+		// overflow and go negative.
+		if h.Size < 0 || h.Size > s.MaxUnpacked-unpacked {
 			return "", badUpload("more than %d MB after unpacking", s.MaxUnpacked>>20)
 		}
+		unpacked += h.Size
 		if err := writeFile(root, name, tr); err != nil {
 			if errors.Is(err, ErrBadUpload) {
 				return "", err
@@ -336,8 +358,8 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 	}
 
 	// The tar end is not the stream end. Read the rest, so that the gzip
-	// checksum is checked and data after the end counts toward MaxUpload.
-	if _, err := io.Copy(io.Discard, gz); err != nil {
+	// checksum is checked and data after the end counts toward the limits.
+	if _, err := io.Copy(io.Discard, unpackedStream); err != nil {
 		if errors.Is(err, ErrBadUpload) {
 			return "", err
 		}

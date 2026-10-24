@@ -63,6 +63,8 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 			setSessionCookie(w, c.Value, sess.ExpiresAt)
 		}
 	}
+
+	// TODO: add paginaton
 	all, err := a.Sites.List(r.Context())
 	if err != nil {
 		a.serverError(w, err)

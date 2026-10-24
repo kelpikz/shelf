@@ -235,8 +235,11 @@ func TestOneFileSiteIsServedAtItsPath(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
 		t.Errorf("Content-Type %q", ct)
 	}
-	if resp := ts.get(filesURL + "/cv/"); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("/cv/: got %d", resp.StatusCode)
+	if resp := ts.get(filesURL + "/cv/"); resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/cv" {
+		t.Errorf("/cv/: got %d to %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if resp := ts.get(filesURL + "/cv/x"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("/cv/x: got %d", resp.StatusCode)
 	}
 }
 

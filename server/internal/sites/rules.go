@@ -45,16 +45,24 @@ func badUpload(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrBadUpload, fmt.Sprintf(format, args...))
 }
 
-// limitReader fails with ErrBadUpload when more than n bytes come. A plain
-// io.LimitReader stops quietly, and the upload looks broken, not too large.
+// tarOverhead is the space for the tar data around one entry: a 512-byte
+// header and up to 511 bytes of padding, with space for a long name.
+const tarOverhead = 2 << 10
+
+// limitReader passes at most n bytes from r and returns ErrBadUpload(msg)
+// past that. io.LimitReader returns io.EOF at the limit, which gzip and tar
+// report as a truncated stream, not as an oversized one.
 type limitReader struct {
-	r io.Reader
-	n int64
+	r   io.Reader
+	n   int64  // bytes left; < 0 once the limit is exceeded
+	msg string // error text
 }
 
+// Read requests at most n+1 bytes, so exactly n bytes followed by EOF passes,
+// and a single extra byte trips the limit. The error is sticky.
 func (l *limitReader) Read(p []byte) (int, error) {
 	if l.n < 0 {
-		return 0, badUpload("the upload is too large")
+		return 0, badUpload("%s", l.msg)
 	}
 	if int64(len(p)) > l.n+1 {
 		p = p[:l.n+1]
@@ -62,7 +70,7 @@ func (l *limitReader) Read(p []byte) (int, error) {
 	n, err := l.r.Read(p)
 	l.n -= int64(n)
 	if l.n < 0 {
-		return n, badUpload("the upload is too large")
+		return n, badUpload("%s", l.msg)
 	}
 	return n, err
 }

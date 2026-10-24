@@ -83,6 +83,11 @@ func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool)
 	name := site.File
 	if site.Kind == sites.File {
 		if hasSlash {
+			// links to /abcd/ gets redirected to /abcd instead of 404
+			if rest == "" {
+				redirect(w, r, "/"+path)
+				return false
+			}
 			s.notFound(w, r)
 			return false
 		}

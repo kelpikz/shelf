@@ -6,10 +6,12 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kelpikz/shelf/server/internal/store"
 )
@@ -240,5 +242,59 @@ func TestPublishCountsFolders(t *testing.T) {
 	ok := []entry{index, {name: "css/", typ: tar.TypeDir}, {name: "css/a.css", body: "x"}}
 	if _, err := s.Publish(ctx, "notes", Folder, tarGz(t, ok...)); err != nil {
 		t.Errorf("3 entries with a limit of 3: got %v", err)
+	}
+}
+
+// A huge size in a tar header must not overflow the sum and skip the limit.
+func TestPublishRefusesHugeFileSize(t *testing.T) {
+	s, _ := newSites(t)
+	s.MaxUnpacked = 16
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg})
+	tw.Write([]byte("x"))
+	tw.WriteHeader(&tar.Header{Name: "big.bin", Mode: 0o644, Size: math.MaxInt64, Typeflag: tar.TypeReg})
+	tw.Write(make([]byte, 1<<20))
+	gz.Close()
+
+	dir := filepath.Join(t.TempDir(), "site")
+	if _, err := s.unpack(dir, Folder, &buf); !errors.Is(err, ErrBadUpload) {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "big.bin")); err == nil {
+		t.Error("the upload wrote big.bin")
+	}
+}
+
+// Data after the tar end is unpacked too, so it counts toward MaxUnpacked.
+func TestPublishLimitsDataAfterTarEnd(t *testing.T) {
+	s, _ := newSites(t)
+	s.MaxUnpacked, s.MaxFiles = 16, 10
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg})
+	tw.Write([]byte("x"))
+	tw.Close()
+	gz.Write(make([]byte, 1<<20))
+	gz.Close()
+
+	if _, err := s.Publish(context.Background(), "notes", Folder, &buf); !errors.Is(err, ErrBadUpload) {
+		t.Errorf("got %v", err)
+	}
+}
+
+// A very deep name must fail fast. The old code took seconds on this name.
+func TestPublishRefusesDeepNameFast(t *testing.T) {
+	s, _ := newSites(t)
+	deep := entry{name: strings.Repeat("a/", 40_000) + "x", body: "x"}
+	start := time.Now()
+	_, err := s.Publish(context.Background(), "notes", Folder, tarGz(t, entry{name: "index.html", body: "x"}, deep))
+	if !errors.Is(err, ErrBadUpload) {
+		t.Errorf("got %v", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("took %s", d)
 	}
 }
