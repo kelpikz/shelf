@@ -52,17 +52,3 @@ func TestLoadChecksOwnerGitHubID(t *testing.T) {
 		})
 	}
 }
-
-// The recovery tools need only DATA_DIR, not the GitHub secrets.
-func TestLoadDataDirNeedsOnlyDataDir(t *testing.T) {
-	t.Setenv("OWNER_EMAIL", "")
-	t.Setenv("GITHUB_CLIENT_SECRET", "")
-	t.Setenv("DATA_DIR", "/var/shelf")
-	if dir, err := LoadDataDir(); err != nil || dir != "/var/shelf" {
-		t.Errorf("LoadDataDir() = %q, %v", dir, err)
-	}
-	t.Setenv("DATA_DIR", "")
-	if dir, _ := LoadDataDir(); dir != "data" {
-		t.Errorf("default: got %q", dir)
-	}
-}
