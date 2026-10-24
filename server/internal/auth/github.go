@@ -1,4 +1,4 @@
-package access
+package auth
 
 import (
 	"context"
@@ -10,29 +10,6 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
 )
-
-// Identity is what a login provider tells us about the person.
-type Identity struct {
-	ID        int64
-	Login     string
-	AvatarURL string
-	Emails    []Email
-}
-
-type Email struct {
-	Address  string
-	Verified bool
-}
-
-// Provider is the seam for a login provider. GitHub is the only one in v1.
-// Tests use a fake, and Google can be a second adapter later.
-type Provider interface {
-	// LoginURL is the address that starts the login. The verifier is the
-	// PKCE secret; only its S256 hash goes in the URL.
-	LoginURL(state, verifier string) string
-	// Finish swaps the code from the callback for the person's identity.
-	Finish(ctx context.Context, code, verifier string) (Identity, error)
-}
 
 type GitHub struct {
 	oauth *oauth2.Config

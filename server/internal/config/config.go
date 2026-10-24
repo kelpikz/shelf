@@ -72,7 +72,7 @@ func Load() (Config, error) {
 		log.Printf("warning: ADMIN_URL uses http, not https: %s", c.AdminURL)
 	}
 
-	// The Owner check compares ASCII only (see access.IsOwner).
+	// The Owner check compares ASCII only (see auth.IsOwner).
 	if !utils.IsASCII(c.OwnerEmail) || strings.Count(c.OwnerEmail, "@") != 1 {
 		return Config{}, fmt.Errorf("OWNER_EMAIL must be one plain ASCII email address, got %q", c.OwnerEmail)
 	}
