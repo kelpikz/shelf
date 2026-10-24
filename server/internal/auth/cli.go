@@ -66,6 +66,8 @@ type CLI struct {
 
 	mu       sync.Mutex
 	failures []time.Time // wrong codes; one Owner, so one global counter
+
+	pollMu sync.Mutex // one Poll at a time, so one approval gives one key
 }
 
 func NewCLI(db *sql.DB) *CLI {
@@ -162,6 +164,9 @@ func (c *CLI) decide(ctx context.Context, userCode, status string) error {
 // Poll is the CLI asking about its login. On PollApproved it gives the key.
 // The key is given once: the login row is deleted in the same transaction.
 func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, string, error) {
+	c.pollMu.Lock()
+	defer c.pollMu.Unlock()
+
 	now := c.Now()
 	id := hash(deviceCode)
 	var status, deviceName string
@@ -202,7 +207,7 @@ func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, string, 
 	if n, err := res.RowsAffected(); err != nil {
 		return "", "", err
 	} else if n != 1 {
-		// A parallel poll took the key.
+		// Cleanup deleted the row after it expired; pollMu does not cover it.
 		return PollExpired, "", nil
 	}
 	key := KeyPrefix + RandomToken()
