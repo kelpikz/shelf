@@ -34,7 +34,7 @@ func main() {
 	github := auth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, cfg.AdminURL+"/auth/github/callback")
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           server.New(cfg, github, auth.NewSessions(db), allSites),
+		Handler:           server.New(cfg, github, auth.NewSessions(db), auth.NewCLI(db), allSites),
 		ReadHeaderTimeout: 10 * time.Second,
 		// The uploads will need more time. Give it to the upload handler
 		// with http.ResponseController, not here.

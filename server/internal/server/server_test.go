@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,7 @@ type testServer struct {
 	h        http.Handler
 	sites    *sites.Sites
 	sessions *auth.Sessions
+	cli      *auth.CLI
 }
 
 func newServer(t *testing.T) *testServer {
@@ -49,8 +51,9 @@ func newServer(t *testing.T) *testServer {
 	}
 	t.Cleanup(func() { db.Close() })
 	cfg := config.Config{OwnerEmail: owner, OwnerGitHubID: 1, AdminURL: adminURL, FilesURL: filesURL, DataDir: dir}
-	ts := &testServer{sites: sites.New(db, dir), sessions: auth.NewSessions(db)}
-	ts.h = New(cfg, fakeGitHub{}, ts.sessions, ts.sites)
+	ts := &testServer{sites: sites.New(db, dir), sessions: auth.NewSessions(db), cli: auth.NewCLI(db)}
+	ts.cli.PollEvery = 0
+	ts.h = New(cfg, fakeGitHub{}, ts.sessions, ts.cli, ts.sites)
 	return ts
 }
 
@@ -123,6 +126,39 @@ func (ts *testServer) adminPost(c *http.Cookie, origin, path string, form url.Va
 	w := httptest.NewRecorder()
 	ts.h.ServeHTTP(w, r)
 	return w.Result()
+}
+
+// apiPost sends a JSON request to the CLI API, with the key if it is set.
+func (ts *testServer) apiPost(path, key string, payload any) *http.Response {
+	b, _ := json.Marshal(payload)
+	r := httptest.NewRequest("POST", adminURL+"/api/v1"+path, bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		r.Header.Set("Authorization", "Bearer "+key)
+	}
+	w := httptest.NewRecorder()
+	ts.h.ServeHTTP(w, r)
+	return w.Result()
+}
+
+func decode[T any](t *testing.T, resp *http.Response) T {
+	t.Helper()
+	var v T
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatalf("decode %d response: %v", resp.StatusCode, err)
+	}
+	return v
+}
+
+type cliLogin struct {
+	DeviceCode      string `json:"device_code"`
+	UserCode        string `json:"user_code"`
+	VerificationURI string `json:"verification_uri"`
+}
+
+type pollAnswer struct {
+	Status string `json:"status"`
+	Key    string `json:"key"`
 }
 
 func body(resp *http.Response) string {
@@ -430,5 +466,51 @@ func TestReplaceDoesNotBreakVisitors(t *testing.T) {
 	readers.Wait()
 	if n := misses.Load(); n > 0 {
 		t.Errorf("%d requests did not get the Site during replaces", n)
+	}
+}
+
+func TestCLILoginOverAPI(t *testing.T) {
+	ts := newServer(t)
+	resp := ts.apiPost("/cli/login", "", map[string]string{"device_name": "laptop"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login: got %d", resp.StatusCode)
+	}
+	login := decode[cliLogin](t, resp)
+	if login.DeviceCode == "" || login.UserCode == "" || login.VerificationURI != adminURL+"/cli/approve" {
+		t.Fatalf("login: %+v", login)
+	}
+	poll := func() pollAnswer {
+		t.Helper()
+		return decode[pollAnswer](t, ts.apiPost("/cli/login/poll", "", map[string]string{"device_code": login.DeviceCode}))
+	}
+
+	if got := poll(); got.Status != "wait" {
+		t.Fatalf("before approval: %+v", got)
+	}
+	if err := ts.cli.Approve(context.Background(), login.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	got := poll()
+	if got.Status != "approved" || got.Key == "" {
+		t.Fatalf("after approval: %+v", got)
+	}
+
+	if resp := ts.apiPost("/cli/logout", got.Key, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout: got %d", resp.StatusCode)
+	}
+	if resp := ts.apiPost("/cli/logout", got.Key, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("key works after logout: got %d", resp.StatusCode)
+	}
+}
+
+func TestAPIRefusesSessionCookie(t *testing.T) {
+	ts := newServer(t)
+	c, _ := ts.login(t)
+	r := httptest.NewRequest("POST", adminURL+"/api/v1/cli/logout", nil)
+	r.AddCookie(c)
+	w := httptest.NewRecorder()
+	ts.h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `"code":"unauthorized"`) {
+		t.Fatalf("got %d %s", w.Code, w.Body)
 	}
 }
