@@ -79,9 +79,10 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	resp := map[string]string{"status": string(status)}
-	if key != "" {
-		resp["key"] = key
+	resp := map[string]any{"status": string(status)}
+	if key.Key != "" {
+		resp["key"] = key.Key
+		resp["expires_at"] = key.ExpiresAt.Unix()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

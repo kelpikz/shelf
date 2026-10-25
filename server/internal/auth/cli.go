@@ -42,6 +42,12 @@ type Login struct {
 	ExpiresAt  time.Time
 }
 
+// NewKey is a key that Poll gives once, on approval.
+type NewKey struct {
+	Key       string
+	ExpiresAt time.Time
+}
+
 // Key is a CLI key record. It never holds the key itself.
 type Key struct {
 	ID         int64
@@ -209,7 +215,7 @@ func (c *CLI) tooManyTries(now time.Time) bool {
 
 // Poll is the CLI asking about its login. On PollApproved it gives the key.
 // The key is given once: the login row is deleted in the same transaction.
-func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, string, error) {
+func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, NewKey, error) {
 	c.pollMu.Lock()
 	defer c.pollMu.Unlock()
 
@@ -221,50 +227,50 @@ func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, string, 
 		`SELECT status, device_name, polled_at FROM cli_logins WHERE device_hash = ? AND expires_at > ?`,
 		id, now.Unix()).Scan(&status, &deviceName, &polledAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return PollExpired, "", nil
+		return PollExpired, NewKey{}, nil
 	}
 	if err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 
 	if _, err := c.db.ExecContext(ctx, `UPDATE cli_logins SET polled_at = ? WHERE device_hash = ?`, now.Unix(), id); err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 	if polledAt != 0 && now.Sub(time.Unix(polledAt, 0)) < c.PollEvery {
-		return PollSlowDown, "", nil
+		return PollSlowDown, NewKey{}, nil
 	}
 
 	switch status {
 	case "pending":
-		return PollWait, "", nil
+		return PollWait, NewKey{}, nil
 	case "denied":
-		return PollDenied, "", nil
+		return PollDenied, NewKey{}, nil
 	}
 
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `DELETE FROM cli_logins WHERE device_hash = ? AND status = 'approved'`, id)
 	if err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	} else if n != 1 {
 		// Cleanup deleted the row after it expired; pollMu does not cover it.
-		return PollExpired, "", nil
+		return PollExpired, NewKey{}, nil
 	}
-	key := KeyPrefix + RandomToken()
+	key := NewKey{Key: KeyPrefix + RandomToken(), ExpiresAt: time.Unix(now.Add(c.KeyTTL).Unix(), 0)}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO cli_keys (key_hash, device_name, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)`,
-		hash(key), deviceName, now.Unix(), now.Add(c.KeyTTL).Unix(), now.Unix())
+		hash(key.Key), deviceName, now.Unix(), key.ExpiresAt.Unix(), now.Unix())
 	if err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return "", "", err
+		return "", NewKey{}, err
 	}
 	return PollApproved, key, nil
 }
