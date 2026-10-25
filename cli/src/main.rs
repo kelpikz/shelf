@@ -9,8 +9,9 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anstream::println;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use reqwest::Url;
 
 use client::Client;
 use ui::{BOLD, CODE, LINK};
@@ -51,17 +52,26 @@ fn main() -> ExitCode {
 }
 
 /// SHELF_URL, or the default server. The key goes over this connection, so
-/// plain http is only for local dev.
+/// plain http is only for local dev. The parsed host is checked, not the
+/// text: in "http://localhost:80@remote.example" the host is remote.example.
 fn server_url(from_env: Option<String>) -> Result<String> {
-    let url = from_env.unwrap_or_else(|| DEFAULT_SERVER.into());
-    let url = url.trim_end_matches('/').to_string();
-    let local = ["http://localhost", "http://127.0.0.1"]
-        .iter()
-        .any(|p| url == *p || url.starts_with(&format!("{p}:")));
-    if !url.starts_with("https://") && !local {
-        bail!("SHELF_URL must start with https://. Only localhost can use http://.");
+    let raw = from_env.unwrap_or_else(|| DEFAULT_SERVER.into());
+    let url = Url::parse(&raw).context("SHELF_URL is not a valid address.")?;
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
+    match url.scheme() {
+        "https" => {}
+        "http" if local => {}
+        _ => bail!("SHELF_URL must start with https://. Only localhost can use http://."),
     }
-    Ok(url)
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        bail!("SHELF_URL must be only the server address, for example {DEFAULT_SERVER}");
+    }
+    Ok(url.origin().ascii_serialization())
 }
 
 /// SHELF_KEY overrides the key store, for computers with no key store.
@@ -79,8 +89,9 @@ fn login(server: &str) -> Result<()> {
     println!("  {LINK}{}{LINK:#}", start.verification_uri);
     println!("  Code: {CODE}{}{CODE:#}", start.user_code);
     println!();
-    // Over SSH there is no browser; the address is on the screen.
-    let _ = open::that(&start.verification_uri);
+    // Detached: some Linux launchers block until they exit, and the poll must
+    // run. Over SSH there is no browser; the address is on the screen.
+    let _ = open::that_detached(&start.verification_uri);
     ui::dim("Waiting for approval...");
 
     let key = login::wait_for_key(
@@ -89,7 +100,11 @@ fn login(server: &str) -> Result<()> {
         thread::sleep,
     )?;
     let old = keystore::load(server).ok().flatten();
-    keystore::save(server, &key)?;
+    if let Err(e) = keystore::save(server, &key) {
+        // The server gives a key only once, and it stays valid for 30 days.
+        show_key_once(&key.key);
+        return Err(e);
+    }
     if let Some(old) = old {
         // The new key replaces it; a failure leaves it to end on its own.
         let _ = client.logout(&old.key);
@@ -101,6 +116,15 @@ fn login(server: &str) -> Result<()> {
         ui::warn("SHELF_KEY is set. The CLI uses it in place of this key.");
     }
     Ok(())
+}
+
+/// For a computer with no key store, for example Linux over SSH.
+fn show_key_once(key: &str) {
+    ui::warn("The key store does not work. This is your key. It is shown one time only:");
+    println!();
+    println!("  {CODE}{key}{CODE:#}");
+    println!();
+    ui::detail("Put it in the SHELF_KEY environment variable. Then shelf uses it.");
 }
 
 fn logout(server: &str) -> Result<()> {
@@ -201,5 +225,10 @@ mod tests {
         assert!(server_url(Some("http://127.0.0.1".into())).is_ok());
         assert!(server_url(Some("http://files-admin.ajitha.fyi".into())).is_err());
         assert!(server_url(Some("http://localhost.example.com".into())).is_err());
+        // The host is remote.example; "localhost:80" is a user name and password.
+        assert!(server_url(Some("http://localhost:80@remote.example".into())).is_err());
+        assert!(server_url(Some("https://user:pw@files-admin.ajitha.fyi".into())).is_err());
+        assert!(server_url(Some("https://files-admin.ajitha.fyi/api?x=1".into())).is_err());
+        assert!(server_url(Some("files-admin.ajitha.fyi".into())).is_err());
     }
 }
