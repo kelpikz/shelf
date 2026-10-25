@@ -101,7 +101,7 @@ fn login(server: &str) -> Result<()> {
     )?;
     let old = keystore::load(server).ok().flatten();
     if let Err(e) = keystore::save(server, &key) {
-        // The server gives a key only once, and it stays valid for 30 days.
+        // The server gives a key only once, and it stays valid until expires_at.
         show_key_once(&key.key);
         return Err(e);
     }

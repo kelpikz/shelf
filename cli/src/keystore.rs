@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use keyring::{Entry, Error};
 
-use crate::client::NewKey;
+use crate::client::SavedKey;
 
 const SERVICE: &str = "shelf";
 
@@ -12,7 +12,7 @@ fn entry(server: &str) -> Result<Entry> {
     Entry::new(SERVICE, server).context("Could not open the system key store")
 }
 
-pub fn load(server: &str) -> Result<Option<NewKey>> {
+pub fn load(server: &str) -> Result<Option<SavedKey>> {
     match entry(server)?.get_password() {
         Ok(json) => Ok(Some(
             serde_json::from_str(&json).context("The saved key is not valid. Run: shelf login")?,
@@ -22,7 +22,7 @@ pub fn load(server: &str) -> Result<Option<NewKey>> {
     }
 }
 
-pub fn save(server: &str, key: &NewKey) -> Result<()> {
+pub fn save(server: &str, key: &SavedKey) -> Result<()> {
     entry(server)?
         .set_password(&serde_json::to_string(key)?)
         .context("Could not save the key in the system key store")

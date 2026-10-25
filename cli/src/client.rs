@@ -22,9 +22,9 @@ pub struct LoginStart {
     pub interval: u64,
 }
 
-/// A key from an approved login. Also the value in the key store.
+/// A key from an approved login, as saved in the key store.
 #[derive(Serialize, Deserialize)]
-pub struct NewKey {
+pub struct SavedKey {
     pub key: String,
     pub expires_at: i64, // Unix seconds
 }
@@ -36,7 +36,7 @@ pub enum Poll {
     SlowDown,
     Denied,
     Expired,
-    Approved(NewKey),
+    Approved(SavedKey),
 }
 
 #[derive(Deserialize)]

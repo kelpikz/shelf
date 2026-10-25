@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 
-use crate::client::{NewKey, Poll};
+use crate::client::{Poll, SavedKey};
 
 const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
@@ -13,7 +13,7 @@ pub fn wait_for_key(
     interval: Duration,
     mut poll: impl FnMut() -> Result<Poll>,
     mut sleep: impl FnMut(Duration),
-) -> Result<NewKey> {
+) -> Result<SavedKey> {
     let mut interval = interval.max(MIN_INTERVAL);
     loop {
         sleep(interval);
@@ -31,15 +31,15 @@ pub fn wait_for_key(
 mod tests {
     use super::*;
 
-    fn key() -> NewKey {
-        NewKey {
+    fn key() -> SavedKey {
+        SavedKey {
             key: "shelf_abc".into(),
             expires_at: 1_800_000_000,
         }
     }
 
     /// Runs wait_for_key with answers from the list. Gives the result and the sleeps.
-    fn run(answers: Vec<Poll>) -> (Result<NewKey>, Vec<u64>) {
+    fn run(answers: Vec<Poll>) -> (Result<SavedKey>, Vec<u64>) {
         let mut answers = answers.into_iter();
         let mut sleeps = Vec::new();
         let got = wait_for_key(
