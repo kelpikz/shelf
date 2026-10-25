@@ -33,6 +33,26 @@ CREATE TABLE IF NOT EXISTS sites (
 	created_at  INTEGER NOT NULL,
 	updated_at  INTEGER NOT NULL           -- the last upload
 );
+
+CREATE TABLE IF NOT EXISTS cli_logins (
+	device_hash TEXT PRIMARY KEY,          -- hash of the secret device code
+	user_code   TEXT NOT NULL UNIQUE,      -- the short code, without the dash
+	device_name TEXT NOT NULL,
+	ip          TEXT NOT NULL,
+	status      TEXT NOT NULL,             -- "pending", "approved", or "denied"
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	polled_at   INTEGER NOT NULL           -- 0 before the first poll
+);
+
+CREATE TABLE IF NOT EXISTS cli_keys (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT, -- never reused: a stale Cancel form must not hit a newer key
+	key_hash     TEXT NOT NULL UNIQUE,
+	device_name  TEXT NOT NULL,
+	created_at   INTEGER NOT NULL,
+	expires_at   INTEGER NOT NULL,
+	last_used_at INTEGER NOT NULL
+);
 `
 
 // Open opens (or creates) shelf.db in dataDir.
