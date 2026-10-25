@@ -91,6 +91,7 @@ func (c *CLI) StartLogin(ctx context.Context, deviceName, ip string) (Login, err
 	c.startMu.Lock()
 	defer c.startMu.Unlock()
 
+	// -- CLEAN UP: Deleting old keys
 	now := c.Now().Unix()
 	if _, err := c.db.ExecContext(ctx, `DELETE FROM cli_logins WHERE expires_at <= ?`, now); err != nil {
 		return Login{}, err
@@ -98,6 +99,7 @@ func (c *CLI) StartLogin(ctx context.Context, deviceName, ip string) (Login, err
 	if _, err := c.db.ExecContext(ctx, `DELETE FROM cli_keys WHERE expires_at <= ?`, now); err != nil {
 		return Login{}, err
 	}
+	// -- END OF CLEAN UP
 
 	var open int
 	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cli_logins`).Scan(&open); err != nil {
