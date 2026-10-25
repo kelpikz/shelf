@@ -49,7 +49,7 @@ func newApp(t *testing.T, id auth.Identity) http.Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return New(owner, 1, adminURL, filesURL, &fakeGitHub{id: id}, auth.NewSessions(db), sites.New(db, dir)).Handler()
+	return New(owner, 1, adminURL, filesURL, &fakeGitHub{id: id}, auth.NewSessions(db), auth.NewCLI(db), sites.New(db, dir)).Handler()
 }
 
 var ownerID = auth.Identity{ID: 1, Login: "ajitha", Emails: []auth.Email{{Address: owner, Verified: true}}}
@@ -261,7 +261,7 @@ func TestOnlyPageVisitsRenew(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	sessions := auth.NewSessions(db)
-	h := New(owner, 1, adminURL, filesURL, &fakeGitHub{id: ownerID}, sessions, sites.New(db, dir)).Handler()
+	h := New(owner, 1, adminURL, filesURL, &fakeGitHub{id: ownerID}, sessions, auth.NewCLI(db), sites.New(db, dir)).Handler()
 	sess := cookie(login(t, h, ""), sessionCookie)
 
 	later := time.Now().Add(2 * 24 * time.Hour)

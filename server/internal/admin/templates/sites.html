@@ -38,6 +38,26 @@
   </section>
   {{end}}
 
+  <h2>CLI keys</h2>
+  <p class="muted">Each computer that ran <code>shelf login</code> has a key for 30 days.</p>
+  {{if .Keys}}
+  <section class="card list">
+    {{range .Keys}}
+    <div class="site">
+      <div class="site-info">
+        <strong>{{.DeviceName}}</strong>
+        <span class="muted small">made {{.CreatedAt.UTC.Format "2 Jan 2006"}} · ends {{.ExpiresAt.UTC.Format "2 Jan 2006"}} · last used {{.LastUsedAt.UTC.Format "2 Jan 2006"}}</span>
+      </div>
+      <div class="site-actions">
+        <form method="post" action="/cli/keys/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.Session.CSRF}}"><button class="btn btn-ghost btn-small">Cancel</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{else}}
+  <p class="muted small">No CLI keys.</p>
+  {{end}}
+
   <section class="card setting">
     <div>
       <h2>Log out all browsers</h2>
