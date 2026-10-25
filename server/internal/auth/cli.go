@@ -135,10 +135,10 @@ func (c *CLI) StartLogin(ctx context.Context, deviceName, ip string) (Login, err
 }
 
 // Approve lets the CLI with this user code get a key on its next poll.
-// A deviceName that is not empty replaces the name that the CLI sent.
+// A deviceName that is not blank replaces the name that the CLI sent.
 // The caller must check the Owner session and the CSRF token first.
 func (c *CLI) Approve(ctx context.Context, userCode, deviceName string) error {
-	if strings.TrimSpace(deviceName) != "" {
+	if deviceName = strings.TrimSpace(deviceName); deviceName != "" {
 		var err error
 		if deviceName, err = checkDeviceName(deviceName); err != nil {
 			return err

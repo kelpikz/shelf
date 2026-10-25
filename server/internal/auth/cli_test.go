@@ -240,6 +240,7 @@ func TestApprovalSetsDeviceName(t *testing.T) {
 	for _, tc := range []struct{ typed, want string }{
 		{"  Work laptop ", "Work laptop"},
 		{"", "DESKTOP-HQOQ832"}, // empty keeps the name that the CLI sent
+		{"   ", "DESKTOP-HQOQ832"},
 	} {
 		login, _ := c.StartLogin(ctx, "DESKTOP-HQOQ832", "")
 		if err := c.Approve(ctx, login.UserCode, tc.typed); err != nil {

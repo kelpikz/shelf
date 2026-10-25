@@ -22,7 +22,7 @@
     </dl>
     <label class="field-label" for="device_name">Device name</label>
     <input class="text-input" id="device_name" name="device_name" form="approve-form" value="{{.DeviceName}}"
-      maxlength="64" autocomplete="off" spellcheck="false" required>
+      autocomplete="off" spellcheck="false">
     <div class="choice">
       <form method="post" action="/cli/approve/deny">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
