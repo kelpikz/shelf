@@ -262,6 +262,7 @@ func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, NewKey, 
 		// Cleanup deleted the row after it expired; pollMu does not cover it.
 		return PollExpired, NewKey{}, nil
 	}
+	// Whole seconds, so the answer has the same expires_at as the row.
 	key := NewKey{Key: KeyPrefix + RandomToken(), ExpiresAt: time.Unix(now.Add(c.KeyTTL).Unix(), 0)}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO cli_keys (key_hash, device_name, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)`,

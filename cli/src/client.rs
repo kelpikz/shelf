@@ -19,7 +19,7 @@ pub struct LoginStart {
     pub device_code: String,
     pub user_code: String,
     pub verification_uri: String,
-    pub interval: u64,
+    pub interval: u64, // seconds between polls
 }
 
 /// A key from an approved login, as saved in the key store.
@@ -46,7 +46,7 @@ struct ErrorBody {
 
 #[derive(Debug, Deserialize)]
 pub struct ApiError {
-    #[serde(skip)]
+    #[serde(skip)] // from the HTTP status line, not the body
     pub status: u16,
     pub message: String,
 }

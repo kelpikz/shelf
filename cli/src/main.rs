@@ -92,7 +92,7 @@ fn login(server: &str) -> Result<()> {
     // Detached: some Linux launchers block until they exit, and the poll must
     // run. Over SSH there is no browser; the address is on the screen.
     let _ = open::that_detached(&start.verification_uri);
-    ui::dim("Waiting for approval...");
+    ui::dim("Approve the login on that page. The CLI waits for you.");
 
     let key = login::wait_for_key(
         Duration::from_secs(start.interval),
@@ -120,7 +120,7 @@ fn login(server: &str) -> Result<()> {
 
 /// For a computer with no key store, for example Linux over SSH.
 fn show_key_once(key: &str) {
-    ui::warn("The key store does not work. This is your key. It is shown one time only:");
+    ui::warn("The key store does not work. The CLI shows your key one time only:");
     println!();
     println!("  {CODE}{key}{CODE:#}");
     println!();

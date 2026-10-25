@@ -21,7 +21,7 @@ pub fn wait_for_key(
             Poll::Wait => {}
             Poll::SlowDown => interval += SLOW_DOWN_STEP,
             Poll::Approved(key) => return Ok(key),
-            Poll::Denied => bail!("The login was denied."),
+            Poll::Denied => bail!("You denied the login."),
             Poll::Expired => bail!("The login code expired. Run: shelf login"),
         }
     }
