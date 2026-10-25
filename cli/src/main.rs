@@ -1,21 +1,24 @@
 mod client;
 mod keystore;
 mod login;
+mod ui;
 
 use std::env;
 use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use anstream::println;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 
 use client::Client;
+use ui::{BOLD, CODE, LINK};
 
 const DEFAULT_SERVER: &str = "https://files-admin.ajitha.fyi";
 
 #[derive(Parser)]
-#[command(version, about = "Upload files and folders to shelf.")]
+#[command(version, about = "Upload files and folders to shelf.", styles = ui::HELP)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -41,7 +44,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("Error: {e:#}");
+            ui::error(&e);
             ExitCode::FAILURE
         }
     }
@@ -71,12 +74,14 @@ fn login(server: &str) -> Result<()> {
     let device = gethostname::gethostname().to_string_lossy().into_owned();
     let start = client.start_login(&device)?;
 
-    println!("Open this page and type the code:\n");
-    println!("  {}", start.verification_uri);
-    println!("  Code: {}\n", start.user_code);
+    println!("Open this page and type the code:");
+    println!();
+    println!("  {LINK}{}{LINK:#}", start.verification_uri);
+    println!("  Code: {CODE}{}{CODE:#}", start.user_code);
+    println!();
     // Over SSH there is no browser; the address is on the screen.
     let _ = open::that(&start.verification_uri);
-    println!("Waiting for approval...");
+    ui::dim("Waiting for approval...");
 
     let key = login::wait_for_key(
         Duration::from_secs(start.interval),
@@ -90,9 +95,10 @@ fn login(server: &str) -> Result<()> {
         let _ = client.logout(&old.key);
     }
 
-    println!("Logged in to {server}. {}", ends_in(key.expires_at));
+    ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
+    ui::detail(ends_in(key.expires_at - now()));
     if env_key().is_some() {
-        println!("Note: SHELF_KEY is set, and the CLI uses it in place of this key.");
+        ui::warn("SHELF_KEY is set. The CLI uses it in place of this key.");
     }
     Ok(())
 }
@@ -104,7 +110,9 @@ fn logout(server: &str) -> Result<()> {
         None => match keystore::load(server)? {
             Some(saved) => saved.key,
             None => {
-                println!("You are not logged in to {server}.");
+                ui::warn(format_args!(
+                    "You are not logged in to {BOLD}{server}{BOLD:#}."
+                ));
                 return Ok(());
             }
         },
@@ -114,38 +122,51 @@ fn logout(server: &str) -> Result<()> {
         Ok(()) => {}
         Err(e) if client::is_unauthorized(&e) => {} // cancelled or ended already
         Err(e) => {
-            return Err(
-                e.context("Could not cancel the key on the server. The key stays on this computer")
-            );
+            return Err(e.context(
+                "Could not cancel the key on the server. The key stays on this computer.",
+            ));
         }
     }
-    if from_env.is_some() {
-        println!("Logged out. Remove SHELF_KEY from your environment.");
-    } else {
+    if from_env.is_none() {
         keystore::delete(server)?;
-        println!("Logged out of {server}.");
+    }
+    ui::ok(format_args!("Logged out of {BOLD}{server}{BOLD:#}"));
+    if from_env.is_some() {
+        ui::warn("Remove SHELF_KEY from your environment.");
     }
     Ok(())
 }
 
 fn status(server: &str) -> Result<()> {
     if env_key().is_some() {
-        println!("Logged in to {server} with SHELF_KEY.");
+        ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
+        ui::detail("With SHELF_KEY.");
         return Ok(());
     }
     match keystore::load(server)? {
-        None => println!("Not logged in to {server}. Run: shelf login"),
-        Some(saved) if saved.expires_at <= now() => {
-            println!("The key for {server} ended. Run: shelf login")
+        None => {
+            ui::bad(format_args!("Not logged in to {BOLD}{server}{BOLD:#}"));
+            ui::hint("shelf login");
         }
-        Some(saved) => println!("Logged in to {server}. {}", ends_in(saved.expires_at)),
+        Some(saved) if saved.expires_at <= now() => {
+            ui::bad(format_args!("The key for {BOLD}{server}{BOLD:#} ended."));
+            ui::hint("shelf login");
+        }
+        Some(saved) => {
+            ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
+            ui::detail(ends_in(saved.expires_at - now()));
+        }
     }
     Ok(())
 }
 
-fn ends_in(expires_at: i64) -> String {
-    match (expires_at - now()) / 86_400 {
-        0 => "The key ends in less than one day.".into(),
+/// Rounds to the nearest day, so a new 30-day key shows 30, not 29.
+fn ends_in(secs_left: i64) -> String {
+    const DAY: i64 = 86_400;
+    if secs_left < DAY {
+        return "The key ends in less than one day.".into();
+    }
+    match (secs_left + DAY / 2) / DAY {
         1 => "The key ends in 1 day.".into(),
         days => format!("The key ends in {days} days."),
     }
@@ -159,7 +180,16 @@ fn now() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::server_url;
+    use super::{ends_in, server_url};
+
+    #[test]
+    fn ends_in_rounds_to_the_nearest_day() {
+        const DAY: i64 = 86_400;
+        assert_eq!(ends_in(30 * DAY - 5), "The key ends in 30 days.");
+        assert_eq!(ends_in(29 * DAY + DAY / 3), "The key ends in 29 days.");
+        assert_eq!(ends_in(DAY + 100), "The key ends in 1 day.");
+        assert_eq!(ends_in(DAY / 2), "The key ends in less than one day.");
+    }
 
     #[test]
     fn server_url_needs_https_except_for_localhost() {
