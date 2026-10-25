@@ -8,8 +8,6 @@ import (
 	"github.com/kelpikz/shelf/server/internal/auth"
 )
 
-const nameError = "A device name has 1 to 64 characters, and no control characters."
-
 var codeErrors = map[error]string{
 	auth.ErrBadCode:      "The code is wrong or expired. Check the code in your terminal.",
 	auth.ErrTooManyTries: "Too many wrong codes. Wait 10 minutes and try again.",
@@ -55,7 +53,7 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, auth.ErrBadName) {
 			var login auth.PendingLogin
 			if login, err = a.CLI.Find(ctx, code); err == nil {
-				page["Step"], page["Login"], page["Error"] = "confirm", login, nameError
+				page["Step"], page["Login"], page["Error"] = "confirm", login, auth.BadNameMessage
 				a.render(w, http.StatusBadRequest, "cli.html", page)
 				return
 			}

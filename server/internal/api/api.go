@@ -127,7 +127,7 @@ func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
 	}
 	name, err := a.CLI.Rename(r.Context(), key.ID, req.DeviceName)
 	if errors.Is(err, auth.ErrBadName) {
-		writeError(w, http.StatusBadRequest, "bad_name", "A device name has 1 to 64 characters, and no control characters.")
+		writeError(w, http.StatusBadRequest, "bad_name", auth.BadNameMessage)
 		return
 	}
 	if err != nil {

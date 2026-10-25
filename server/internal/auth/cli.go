@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,13 @@ var (
 	ErrBadCode       = errors.New("the code is wrong or expired")
 	ErrTooManyTries  = errors.New("too many wrong codes, try again later")
 	ErrTooManyLogins = errors.New("too many open CLI logins, try again later")
-	ErrBadName       = errors.New("a device name has 1 to 64 characters, and no control characters")
+	ErrBadName       = errors.New("bad device name")
 )
+
+const maxDeviceName = 64 // runes
+
+// BadNameMessage explains ErrBadName to the Owner.
+var BadNameMessage = fmt.Sprintf("A device name has 1 to %d characters, and no control characters.", maxDeviceName)
 
 // KeyPrefix starts every CLI key, so a leaked key is easy to find.
 const KeyPrefix = "shelf_"
@@ -379,7 +385,7 @@ func normalizeUserCode(s string) string {
 // could change the terminal or the page layout.
 func checkDeviceName(s string) (string, error) {
 	s = strings.TrimSpace(s)
-	if n := len([]rune(s)); n == 0 || n > 64 || strings.IndexFunc(s, unicode.IsControl) >= 0 {
+	if n := len([]rune(s)); n == 0 || n > maxDeviceName || strings.IndexFunc(s, unicode.IsControl) >= 0 {
 		return "", ErrBadName
 	}
 	return s, nil
@@ -392,8 +398,8 @@ func cleanDeviceName(s string) string {
 	if s == "" {
 		return "unknown"
 	}
-	if r := []rune(s); len(r) > 64 {
-		s = string(r[:64])
+	if r := []rune(s); len(r) > maxDeviceName {
+		s = string(r[:maxDeviceName])
 	}
 	return s
 }
