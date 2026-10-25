@@ -90,6 +90,6 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	}
 	a.render(w, http.StatusOK, "sites.html", map[string]any{
 		"Session": sess, "Sites": live, "Archived": archived, "Keys": keys, "FilesURL": a.FilesURL,
-		"Error": siteErrors[r.URL.Query().Get("error")],
+		"Now": a.CLI.Now(), "Error": siteErrors[r.URL.Query().Get("error")],
 	})
 }

@@ -300,3 +300,18 @@ func readBody(resp *http.Response) string {
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
 }
+
+func TestEndsInRoundsToTheNearestDay(t *testing.T) {
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	for left, want := range map[time.Duration]string{
+		30*day - 5*time.Second: "ends in 30 days",
+		29*day + day/3:         "ends in 29 days",
+		day + time.Minute:      "ends in 1 day",
+		day / 2:                "ends in less than one day",
+	} {
+		if got := endsIn(now, now.Add(left)); got != want {
+			t.Errorf("%v left: got %q, want %q", left, got, want)
+		}
+	}
+}
