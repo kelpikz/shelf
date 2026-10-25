@@ -1,4 +1,4 @@
-// Package store opens the SQLite database and migrates it.
+// Package store opens the SQLite database and creates the tables.
 package store
 
 import (
@@ -6,17 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-// migrations run in order. PRAGMA user_version holds how many have run.
-// Never edit one that has shipped; add a new one.
-var migrations = []string{
-	// 1: sessions and Sites. IF NOT EXISTS: databases from before migrations
-	// have these tables at user_version 0.
-	`
+const schema = `
 CREATE TABLE IF NOT EXISTS sessions (
 	id_hash         TEXT PRIMARY KEY,
 	csrf            TEXT NOT NULL,
@@ -39,15 +33,8 @@ CREATE TABLE IF NOT EXISTS sites (
 	created_at  INTEGER NOT NULL,
 	updated_at  INTEGER NOT NULL           -- the last upload
 );
-`,
-	// 2: CLI logins and keys. Dev databases from the unmerged CLI branches
-	// may have these tables without AUTOINCREMENT, so they are made again.
-	// The rows are only open logins and CLI keys.
-	`
-DROP TABLE IF EXISTS cli_logins;
-DROP TABLE IF EXISTS cli_keys;
 
-CREATE TABLE cli_logins (
+CREATE TABLE IF NOT EXISTS cli_logins (
 	device_hash TEXT PRIMARY KEY,          -- hash of the secret device code
 	user_code   TEXT NOT NULL UNIQUE,      -- the short code, without the dash
 	device_name TEXT NOT NULL,
@@ -58,7 +45,7 @@ CREATE TABLE cli_logins (
 	polled_at   INTEGER NOT NULL           -- 0 before the first poll
 );
 
-CREATE TABLE cli_keys (
+CREATE TABLE IF NOT EXISTS cli_keys (
 	id           INTEGER PRIMARY KEY AUTOINCREMENT, -- never reused: a stale Cancel form must not hit a newer key
 	key_hash     TEXT NOT NULL UNIQUE,
 	device_name  TEXT NOT NULL,
@@ -66,8 +53,7 @@ CREATE TABLE cli_keys (
 	expires_at   INTEGER NOT NULL,
 	last_used_at INTEGER NOT NULL
 );
-`,
-}
+`
 
 // Open opens (or creates) shelf.db in dataDir.
 func Open(dataDir string) (*sql.DB, error) {
@@ -80,53 +66,9 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db, dataDir); err != nil {
+	if _, err := db.Exec(schema); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("create tables: %w", err)
 	}
 	return db, nil
-}
-
-// migrate runs the migrations that have not run. If the database has tables,
-// it first copies it to DATA_DIR/backups; if the copy fails, nothing changes.
-func migrate(db *sql.DB, dataDir string) error {
-	var version, tables int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return err
-	}
-	if version >= len(migrations) {
-		return nil
-	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
-		return err
-	}
-	if tables > 0 {
-		dir := filepath.Join(dataDir, "backups")
-		backup := filepath.Join(dir, fmt.Sprintf("shelf-v%d-%d.db", version, time.Now().Unix()))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("backup before migration failed, nothing changed: %w", err)
-		}
-		if _, err := db.Exec(`VACUUM INTO ?`, backup); err != nil {
-			return fmt.Errorf("backup before migration failed, nothing changed: %w", err)
-		}
-	}
-
-	for i := version; i < len(migrations); i++ {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(migrations[i]); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("migration %d: %w", i+1, err)
-		}
-	}
-	return nil
 }
