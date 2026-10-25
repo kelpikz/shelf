@@ -33,6 +33,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/cli/login", a.startLogin)
 	mux.HandleFunc("POST /api/v1/cli/login/poll", a.poll)
 	mux.HandleFunc("POST /api/v1/cli/logout", a.logout)
+	mux.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
 	mux.HandleFunc("PATCH /api/v1/cli/key", a.renameKey)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API request.")
@@ -102,6 +103,16 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// keyInfo describes the key that sends the request. A cancelled or ended key
+// gets 401.
+func (a *API) keyInfo(w http.ResponseWriter, r *http.Request) {
+	key, ok := a.key(w, r)
+	if !ok {
+		return
+	}
+	writeKey(w, key)
+}
+
 // renameKey sets the device name of the key that sends the request.
 func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
 	key, ok := a.key(w, r)
@@ -123,7 +134,12 @@ func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"device_name": name})
+	key.DeviceName = name
+	writeKey(w, key)
+}
+
+func writeKey(w http.ResponseWriter, key auth.Key) {
+	writeJSON(w, http.StatusOK, map[string]any{"device_name": key.DeviceName, "expires_at": key.ExpiresAt.Unix()})
 }
 
 // key checks the Bearer key. If the check fails, it writes the response and

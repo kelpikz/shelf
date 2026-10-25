@@ -572,13 +572,26 @@ func TestOwnerCancelsCLIKey(t *testing.T) {
 	if page := body(ts.adminGet(c, "/")); !strings.Contains(page, "work-pc") {
 		t.Fatal("the key is not on the Admin page")
 	}
-	resp := ts.adminPost(c, adminURL, "/cli/keys/"+strconv.FormatInt(k.ID, 10)+"/revoke", url.Values{"csrf": {csrf}})
+	// shelf status asks the server about its key.
+	resp := ts.api("GET", "/cli/key", key, nil)
+	if got := decode[keyAnswer](t, resp); resp.StatusCode != http.StatusOK || got.DeviceName != "work-pc" || got.ExpiresAt != k.ExpiresAt.Unix() {
+		t.Fatalf("key info: got %d %+v", resp.StatusCode, got)
+	}
+	resp = ts.adminPost(c, adminURL, "/cli/keys/"+strconv.FormatInt(k.ID, 10)+"/revoke", url.Values{"csrf": {csrf}})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("revoke: got %d", resp.StatusCode)
 	}
 	if _, ok, _ := ts.cli.CheckKey(ctx, key); ok {
 		t.Fatal("key works after cancel")
 	}
+	if resp := ts.api("GET", "/cli/key", key, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("key info after cancel: got %d", resp.StatusCode)
+	}
+}
+
+type keyAnswer struct {
+	DeviceName string `json:"device_name"`
+	ExpiresAt  int64  `json:"expires_at"`
 }
 
 func TestAPIRefusesBadJSON(t *testing.T) {
@@ -625,7 +638,7 @@ func TestCLIRenamesItsKey(t *testing.T) {
 	key := ts.apiKey(t, "DESKTOP-HQOQ832")
 
 	resp := ts.api("PATCH", "/cli/key", key, map[string]string{"device_name": "Home PC"})
-	if got := decode[map[string]string](t, resp); resp.StatusCode != http.StatusOK || got["device_name"] != "Home PC" {
+	if got := decode[keyAnswer](t, resp); resp.StatusCode != http.StatusOK || got.DeviceName != "Home PC" || got.ExpiresAt == 0 {
 		t.Fatalf("rename: got %d %v", resp.StatusCode, got)
 	}
 	c, _ := ts.login(t)

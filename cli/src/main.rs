@@ -168,45 +168,50 @@ fn logout(server: &str) -> Result<()> {
     Ok(())
 }
 
+/// The server checks the key each time: the Owner can cancel it on the Admin
+/// page, and the saved copy does not know.
 fn status(server: &str) -> Result<()> {
-    if env_key().is_some() {
-        ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
-        ui::detail("With SHELF_KEY.");
+    let Some(key) = current_key(server)? else {
+        ui::bad(format_args!("Not logged in to {BOLD}{server}{BOLD:#}"));
+        ui::hint("shelf login");
         return Ok(());
-    }
-    match keystore::load(server)? {
-        None => {
+    };
+    match Client::new(server)?.key_info(&key) {
+        Ok(info) => {
+            ui::ok(logged_in(server, &info.device_name));
+            ui::detail(ends_in(info.expires_at - now()));
+            if env_key().is_some() {
+                ui::detail("With SHELF_KEY.");
+            }
+        }
+        Err(e) if client::is_unauthorized(&e) => {
             ui::bad(format_args!("Not logged in to {BOLD}{server}{BOLD:#}"));
+            ui::detail("The key was cancelled, or it ended.");
             ui::hint("shelf login");
         }
-        Some(saved) if saved.expires_at <= now() => {
-            ui::bad(format_args!("The key for {BOLD}{server}{BOLD:#} ended."));
-            ui::hint("shelf login");
-        }
-        Some(saved) => {
-            ui::ok(logged_in(server, &saved.device_name));
-            ui::detail(ends_in(saved.expires_at - now()));
-        }
+        Err(e) => return Err(e.context("Could not check the key.")),
     }
     Ok(())
 }
 
 fn set_name(server: &str, name: &str) -> Result<()> {
-    let client = Client::new(server)?;
-    let name = match env_key() {
-        // No saved key to update.
-        Some(key) => client.set_device_name(&key, name)?,
-        None => {
-            let Some(mut saved) = keystore::load(server)? else {
-                bail!("You are not logged in to {server}. Run: shelf login");
-            };
-            saved.device_name = client.set_device_name(&saved.key, name)?;
-            keystore::save(server, &saved)?;
-            saved.device_name
-        }
+    let Some(key) = current_key(server)? else {
+        bail!("You are not logged in to {server}. Run: shelf login");
     };
-    ui::ok(format_args!("The device name is now {BOLD}{name}{BOLD:#}"));
+    let info = Client::new(server)?.set_device_name(&key, name)?;
+    ui::ok(format_args!(
+        "The device name is now {BOLD}{}{BOLD:#}",
+        info.device_name
+    ));
     Ok(())
+}
+
+/// SHELF_KEY, or the saved key.
+fn current_key(server: &str) -> Result<Option<String>> {
+    match env_key() {
+        Some(key) => Ok(Some(key)),
+        None => Ok(keystore::load(server)?.map(|saved| saved.key)),
+    }
 }
 
 /// "Logged in to <server> as <name>". Keys saved before device names have no name.

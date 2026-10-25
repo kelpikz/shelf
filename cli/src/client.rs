@@ -32,6 +32,13 @@ pub struct SavedKey {
     pub expires_at: i64, // Unix seconds
 }
 
+/// What the server knows about a key.
+#[derive(Deserialize)]
+pub struct KeyInfo {
+    pub device_name: String,
+    pub expires_at: i64, // Unix seconds
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Poll {
@@ -80,7 +87,7 @@ impl Client {
                 Method::POST,
                 "/cli/login",
                 None,
-                json!({ "device_name": device_name }),
+                Some(json!({ "device_name": device_name })),
             )?
             .json()?)
     }
@@ -91,31 +98,33 @@ impl Client {
                 Method::POST,
                 "/cli/login/poll",
                 None,
-                json!({ "device_code": device_code }),
+                Some(json!({ "device_code": device_code })),
             )?
             .json()?)
     }
 
     pub fn logout(&self, key: &str) -> Result<()> {
-        self.send(Method::POST, "/cli/logout", Some(key), json!({}))?;
+        self.send(Method::POST, "/cli/logout", Some(key), None)?;
         Ok(())
     }
 
-    /// Renames the key on the server. Gives the name that the server stored.
-    pub fn set_device_name(&self, key: &str, name: &str) -> Result<String> {
-        #[derive(Deserialize)]
-        struct Answer {
-            device_name: String,
-        }
-        let answer: Answer = self
+    /// Asks the server about the key. A cancelled or ended key gives 401.
+    pub fn key_info(&self, key: &str) -> Result<KeyInfo> {
+        Ok(self
+            .send(Method::GET, "/cli/key", Some(key), None)?
+            .json()?)
+    }
+
+    /// Renames the key on the server.
+    pub fn set_device_name(&self, key: &str, name: &str) -> Result<KeyInfo> {
+        Ok(self
             .send(
                 Method::PATCH,
                 "/cli/key",
                 Some(key),
-                json!({ "device_name": name }),
+                Some(json!({ "device_name": name })),
             )?
-            .json()?;
-        Ok(answer.device_name)
+            .json()?)
     }
 
     fn send(
@@ -123,12 +132,14 @@ impl Client {
         method: Method,
         path: &str,
         key: Option<&str>,
-        body: serde_json::Value,
+        body: Option<serde_json::Value>,
     ) -> Result<Response> {
         let mut req = self
             .http
-            .request(method, format!("{}/api/v1{path}", self.base))
-            .json(&body);
+            .request(method, format!("{}/api/v1{path}", self.base));
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
         if let Some(key) = key {
             req = req.bearer_auth(key);
         }
