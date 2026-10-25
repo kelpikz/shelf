@@ -66,6 +66,23 @@ type Key struct {
 	LastUsedAt time.Time
 }
 
+// KeyChanges is the whitelist of Key fields that can change. A nil field
+// stays the same. A new field needs a check in UpdateKey.
+type KeyChanges struct {
+	DeviceName *string `json:"device_name"`
+}
+
+const keyColumns = `id, device_name, created_at, expires_at, last_used_at`
+
+// scanKey reads one row of keyColumns.
+func scanKey(row interface{ Scan(...any) error }) (Key, error) {
+	var k Key
+	var created, expires, used int64
+	err := row.Scan(&k.ID, &k.DeviceName, &created, &expires, &used)
+	k.CreatedAt, k.ExpiresAt, k.LastUsedAt = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(used, 0)
+	return k, err
+}
+
 // CLI runs the device flow for the CLI and checks CLI keys. The tables hold
 // only hashes of device codes and keys.
 type CLI struct {
@@ -301,18 +318,15 @@ func (c *CLI) CheckKey(ctx context.Context, key string) (Key, bool, error) {
 		return Key{}, false, nil
 	}
 	now := c.Now()
-	var k Key
-	var created, expires, used int64
-	err := c.db.QueryRowContext(ctx,
-		`SELECT id, device_name, created_at, expires_at, last_used_at FROM cli_keys WHERE key_hash = ? AND expires_at > ?`,
-		hash(key), now.Unix()).Scan(&k.ID, &k.DeviceName, &created, &expires, &used)
+	k, err := scanKey(c.db.QueryRowContext(ctx,
+		`SELECT `+keyColumns+` FROM cli_keys WHERE key_hash = ? AND expires_at > ?`,
+		hash(key), now.Unix()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Key{}, false, nil
 	}
 	if err != nil {
 		return Key{}, false, err
 	}
-	k.CreatedAt, k.ExpiresAt, k.LastUsedAt = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(used, 0)
 
 	if now.Sub(k.LastUsedAt) >= c.UseEvery {
 		if _, err := c.db.ExecContext(ctx, `UPDATE cli_keys SET last_used_at = ? WHERE id = ?`, now.Unix(), k.ID); err != nil {
@@ -326,7 +340,7 @@ func (c *CLI) CheckKey(ctx context.Context, key string) (Key, bool, error) {
 // Keys lists the CLI keys that have not expired, newest first.
 func (c *CLI) Keys(ctx context.Context) ([]Key, error) {
 	rows, err := c.db.QueryContext(ctx,
-		`SELECT id, device_name, created_at, expires_at, last_used_at FROM cli_keys
+		`SELECT `+keyColumns+` FROM cli_keys
 		 WHERE expires_at > ? ORDER BY created_at DESC, id DESC`, c.Now().Unix())
 	if err != nil {
 		return nil, err
@@ -334,26 +348,33 @@ func (c *CLI) Keys(ctx context.Context) ([]Key, error) {
 	defer rows.Close()
 	var keys []Key
 	for rows.Next() {
-		var k Key
-		var created, expires, used int64
-		if err := rows.Scan(&k.ID, &k.DeviceName, &created, &expires, &used); err != nil {
+		k, err := scanKey(rows)
+		if err != nil {
 			return nil, err
 		}
-		k.CreatedAt, k.ExpiresAt, k.LastUsedAt = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(used, 0)
 		keys = append(keys, k)
 	}
 	return keys, rows.Err()
 }
 
-// Rename sets the device name of a CLI key and gives the stored name.
-// An unknown id is not an error.
-func (c *CLI) Rename(ctx context.Context, id int64, name string) (string, error) {
-	name, err := checkDeviceName(name)
-	if err != nil {
-		return "", err
+// UpdateKey applies the changes to a CLI key and gives the stored key. An
+// unknown id gives false, not an error.
+func (c *CLI) UpdateKey(ctx context.Context, id int64, ch KeyChanges) (Key, bool, error) {
+	if ch.DeviceName != nil {
+		name, err := checkDeviceName(*ch.DeviceName)
+		if err != nil {
+			return Key{}, false, err
+		}
+		ch.DeviceName = &name
 	}
-	_, err = c.db.ExecContext(ctx, `UPDATE cli_keys SET device_name = ? WHERE id = ?`, name, id)
-	return name, err
+	// NULL keeps the old value.
+	k, err := scanKey(c.db.QueryRowContext(ctx,
+		`UPDATE cli_keys SET device_name = COALESCE(?, device_name) WHERE id = ? RETURNING `+keyColumns,
+		ch.DeviceName, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Key{}, false, nil
+	}
+	return k, err == nil, err
 }
 
 // Revoke deletes a CLI key. An unknown id is not an error.

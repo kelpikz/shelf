@@ -77,8 +77,9 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 	a.render(w, http.StatusOK, "cli.html", page)
 }
 
-// renameKey sets the device name of one CLI key from the "CLI keys" list.
-func (a *App) renameKey(w http.ResponseWriter, r *http.Request) {
+// updateKey changes one CLI key from the "CLI keys" list. Only the form
+// fields in auth.KeyChanges are read.
+func (a *App) updateKey(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.checkPost(w, r); !ok {
 		return
 	}
@@ -87,7 +88,12 @@ func (a *App) renameKey(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	_, err = a.CLI.Rename(r.Context(), id, r.PostFormValue("device_name"))
+	var ch auth.KeyChanges
+	if r.PostForm.Has("device_name") {
+		name := r.PostForm.Get("device_name")
+		ch.DeviceName = &name
+	}
+	_, _, err = a.CLI.UpdateKey(r.Context(), id, ch) // an unknown id was cancelled; the list no longer has it
 	if errors.Is(err, auth.ErrBadName) {
 		http.Redirect(w, r, "/?error=name", http.StatusSeeOther)
 		return

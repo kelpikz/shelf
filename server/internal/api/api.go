@@ -34,7 +34,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/cli/login/poll", a.poll)
 	mux.HandleFunc("POST /api/v1/cli/logout", a.logout)
 	mux.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
-	mux.HandleFunc("PATCH /api/v1/cli/key", a.renameKey)
+	mux.HandleFunc("PATCH /api/v1/cli/key", a.updateKey)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API request.")
 	})
@@ -113,19 +113,18 @@ func (a *API) keyInfo(w http.ResponseWriter, r *http.Request) {
 	writeKey(w, key)
 }
 
-// renameKey sets the device name of the key that sends the request.
-func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
+// updateKey changes the key that sends the request. Only the KeyChanges
+// fields are allowed in the body.
+func (a *API) updateKey(w http.ResponseWriter, r *http.Request) {
 	key, ok := a.key(w, r)
 	if !ok {
 		return
 	}
-	var req struct {
-		DeviceName string `json:"device_name"`
-	}
-	if !readJSON(w, r, &req) {
+	var ch auth.KeyChanges
+	if !readJSON(w, r, &ch) {
 		return
 	}
-	name, err := a.CLI.Rename(r.Context(), key.ID, req.DeviceName)
+	key, ok, err := a.CLI.UpdateKey(r.Context(), key.ID, ch)
 	if errors.Is(err, auth.ErrBadName) {
 		writeError(w, http.StatusBadRequest, "bad_name", auth.BadNameMessage)
 		return
@@ -134,7 +133,10 @@ func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	key.DeviceName = name
+	if !ok { // cancelled after the key check
+		writeError(w, http.StatusUnauthorized, "unauthorized", "The key is not valid. Log in with: shelf login")
+		return
+	}
 	writeKey(w, key)
 }
 

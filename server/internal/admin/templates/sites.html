@@ -50,8 +50,8 @@
       </div>
       <div class="site-actions">
         <details class="inline-form">
-          <summary class="btn btn-ghost btn-small">Rename</summary>
-          <form method="post" action="/cli/keys/{{.ID}}/rename">
+          <summary class="btn btn-ghost btn-small">Edit</summary>
+          <form method="post" action="/cli/keys/{{.ID}}/update">
             <input type="hidden" name="csrf" value="{{$.Session.CSRF}}">
             <label>Device name
               <input name="device_name" value="{{.DeviceName}}" autocomplete="off" spellcheck="false" required>

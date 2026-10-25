@@ -263,25 +263,31 @@ func TestApprovalSetsDeviceName(t *testing.T) {
 	}
 }
 
-func TestRenameKey(t *testing.T) {
+func TestUpdateKey(t *testing.T) {
 	c, _ := newCLI(t)
 	ctx := context.Background()
 	key := approvedKey(t, c)
 	k, _, _ := c.CheckKey(ctx, key)
 
-	got, err := c.Rename(ctx, k.ID, " Home PC ")
-	if err != nil || got != "Home PC" {
-		t.Fatalf("rename: %q, %v", got, err)
+	got, ok, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: ptr(" Home PC ")})
+	if err != nil || !ok || got.DeviceName != "Home PC" || got.ID != k.ID || !got.ExpiresAt.Equal(k.ExpiresAt) {
+		t.Fatalf("update: %+v, %v, %v", got, ok, err)
 	}
 	if k, _, _ := c.CheckKey(ctx, key); k.DeviceName != "Home PC" {
-		t.Fatalf("after rename: %q", k.DeviceName)
+		t.Fatalf("after update: %q", k.DeviceName)
 	}
 	for _, bad := range []string{"", "   ", strings.Repeat("é", 65), "a\x1b[31mb", "a\nb"} {
-		if _, err := c.Rename(ctx, k.ID, bad); !errors.Is(err, ErrBadName) {
-			t.Errorf("rename to %q: %v, want ErrBadName", bad, err)
+		if _, _, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: &bad}); !errors.Is(err, ErrBadName) {
+			t.Errorf("name %q: %v, want ErrBadName", bad, err)
 		}
 	}
-	if k, _, _ := c.CheckKey(ctx, key); k.DeviceName != "Home PC" {
-		t.Fatalf("a bad name changed the key: %q", k.DeviceName)
+	// A nil field stays the same.
+	if got, _, err := c.UpdateKey(ctx, k.ID, KeyChanges{}); err != nil || got.DeviceName != "Home PC" {
+		t.Fatalf("no changes: %q, %v", got.DeviceName, err)
+	}
+	if _, ok, err := c.UpdateKey(ctx, k.ID+100, KeyChanges{DeviceName: ptr("x")}); ok || err != nil {
+		t.Fatalf("unknown id: %v, %v", ok, err)
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

@@ -633,7 +633,7 @@ func (ts *testServer) apiKey(t *testing.T, deviceName string) string {
 	return key.Key
 }
 
-func TestCLIRenamesItsKey(t *testing.T) {
+func TestCLIUpdatesItsKey(t *testing.T) {
 	ts := newServer(t)
 	key := ts.apiKey(t, "DESKTOP-HQOQ832")
 
@@ -666,13 +666,13 @@ func TestCLIRenamesItsKey(t *testing.T) {
 	}
 }
 
-func TestOwnerRenamesCLIKey(t *testing.T) {
+func TestOwnerUpdatesCLIKey(t *testing.T) {
 	ts := newServer(t)
 	ctx := context.Background()
 	key := ts.apiKey(t, "DESKTOP-HQOQ832")
 	k, _, _ := ts.cli.CheckKey(ctx, key)
 	c, csrf := ts.login(t)
-	path := "/cli/keys/" + strconv.FormatInt(k.ID, 10) + "/rename"
+	path := "/cli/keys/" + strconv.FormatInt(k.ID, 10) + "/update"
 
 	resp := ts.adminPost(c, adminURL, path, url.Values{"csrf": {csrf}, "device_name": {"Work laptop"}})
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
