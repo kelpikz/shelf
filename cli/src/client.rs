@@ -5,6 +5,7 @@ use std::fmt;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use reqwest::Method;
 use reqwest::blocking::Response;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -26,6 +27,8 @@ pub struct LoginStart {
 #[derive(Serialize, Deserialize)]
 pub struct SavedKey {
     pub key: String,
+    #[serde(default)] // keys saved before device names
+    pub device_name: String,
     pub expires_at: i64, // Unix seconds
 }
 
@@ -73,13 +76,19 @@ impl Client {
 
     pub fn start_login(&self, device_name: &str) -> Result<LoginStart> {
         Ok(self
-            .post("/cli/login", None, json!({ "device_name": device_name }))?
+            .send(
+                Method::POST,
+                "/cli/login",
+                None,
+                json!({ "device_name": device_name }),
+            )?
             .json()?)
     }
 
     pub fn poll(&self, device_code: &str) -> Result<Poll> {
         Ok(self
-            .post(
+            .send(
+                Method::POST,
                 "/cli/login/poll",
                 None,
                 json!({ "device_code": device_code }),
@@ -88,14 +97,37 @@ impl Client {
     }
 
     pub fn logout(&self, key: &str) -> Result<()> {
-        self.post("/cli/logout", Some(key), json!({}))?;
+        self.send(Method::POST, "/cli/logout", Some(key), json!({}))?;
         Ok(())
     }
 
-    fn post(&self, path: &str, key: Option<&str>, body: serde_json::Value) -> Result<Response> {
+    /// Renames the key on the server. Gives the name that the server stored.
+    pub fn set_device_name(&self, key: &str, name: &str) -> Result<String> {
+        #[derive(Deserialize)]
+        struct Answer {
+            device_name: String,
+        }
+        let answer: Answer = self
+            .send(
+                Method::PATCH,
+                "/cli/key",
+                Some(key),
+                json!({ "device_name": name }),
+            )?
+            .json()?;
+        Ok(answer.device_name)
+    }
+
+    fn send(
+        &self,
+        method: Method,
+        path: &str,
+        key: Option<&str>,
+        body: serde_json::Value,
+    ) -> Result<Response> {
         let mut req = self
             .http
-            .post(format!("{}/api/v1{path}", self.base))
+            .request(method, format!("{}/api/v1{path}", self.base))
             .json(&body);
         if let Some(key) = key {
             req = req.bearer_auth(key);
@@ -123,4 +155,24 @@ impl Client {
 pub fn is_unauthorized(err: &anyhow::Error) -> bool {
     err.downcast_ref::<ApiError>()
         .is_some_and(|e| e.status == 401)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Poll, SavedKey};
+
+    #[test]
+    fn approved_poll_has_the_device_name() {
+        let poll: Poll = serde_json::from_str(
+            r#"{"status":"approved","key":"shelf_x","device_name":"Work laptop","expires_at":1}"#,
+        )
+        .unwrap();
+        assert!(matches!(poll, Poll::Approved(k) if k.device_name == "Work laptop"));
+    }
+
+    #[test]
+    fn a_key_saved_before_device_names_still_loads() {
+        let key: SavedKey = serde_json::from_str(r#"{"key":"shelf_x","expires_at":1}"#).unwrap();
+        assert_eq!(key.device_name, "");
+    }
 }

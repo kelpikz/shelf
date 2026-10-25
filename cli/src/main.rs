@@ -33,6 +33,12 @@ enum Command {
     Logout,
     /// Show if you are logged in, and when the key ends
     Status,
+    /// Change a setting of this computer's key
+    Set {
+        /// The device name on the Admin page, for example "Work laptop"
+        #[arg(long)]
+        name: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -41,6 +47,7 @@ fn main() -> ExitCode {
         Command::Login => login(&server),
         Command::Logout => logout(&server),
         Command::Status => status(&server),
+        Command::Set { name } => set_name(&server, &name),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -110,7 +117,7 @@ fn login(server: &str) -> Result<()> {
         let _ = client.logout(&old.key);
     }
 
-    ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
+    ui::ok(logged_in(server, &key.device_name));
     ui::detail(ends_in(key.expires_at - now()));
     if env_key().is_some() {
         ui::warn("SHELF_KEY is set. The CLI uses it in place of this key.");
@@ -177,11 +184,38 @@ fn status(server: &str) -> Result<()> {
             ui::hint("shelf login");
         }
         Some(saved) => {
-            ui::ok(format_args!("Logged in to {BOLD}{server}{BOLD:#}"));
+            ui::ok(logged_in(server, &saved.device_name));
             ui::detail(ends_in(saved.expires_at - now()));
         }
     }
     Ok(())
+}
+
+fn set_name(server: &str, name: &str) -> Result<()> {
+    let client = Client::new(server)?;
+    let name = match env_key() {
+        // No saved key to update.
+        Some(key) => client.set_device_name(&key, name)?,
+        None => {
+            let Some(mut saved) = keystore::load(server)? else {
+                bail!("You are not logged in to {server}. Run: shelf login");
+            };
+            saved.device_name = client.set_device_name(&saved.key, name)?;
+            keystore::save(server, &saved)?;
+            saved.device_name
+        }
+    };
+    ui::ok(format_args!("The device name is now {BOLD}{name}{BOLD:#}"));
+    Ok(())
+}
+
+/// "Logged in to <server> as <name>". Keys saved before device names have no name.
+fn logged_in(server: &str, device_name: &str) -> String {
+    let mut msg = format!("Logged in to {BOLD}{server}{BOLD:#}");
+    if !device_name.is_empty() {
+        msg += &format!(" as {BOLD}{device_name}{BOLD:#}");
+    }
+    msg
 }
 
 /// Rounds to the nearest day, so a new 30-day key shows 30, not 29.
