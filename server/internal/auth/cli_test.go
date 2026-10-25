@@ -50,7 +50,7 @@ func TestCLILoginGivesKeyOnce(t *testing.T) {
 	}
 
 	// The Owner types the code in lower case, with the dash.
-	if err := c.Approve(ctx, "  "+strings.ToLower(login.UserCode)+" "); err != nil {
+	if err := c.Approve(ctx, "  "+strings.ToLower(login.UserCode)+" ", ""); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(c.PollEvery)
@@ -78,7 +78,7 @@ func TestDeniedLoginGivesNoKey(t *testing.T) {
 	if s, key := poll(t, c, login.DeviceCode); s != PollDenied || key != "" {
 		t.Fatalf("poll: %q, key %q", s, key)
 	}
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("approve after deny: %v, want ErrBadCode", err)
 	}
 }
@@ -88,12 +88,12 @@ func TestWrongOrExpiredCodeRefused(t *testing.T) {
 	ctx := context.Background()
 	login, _ := c.StartLogin(ctx, "laptop", "")
 
-	if err := c.Approve(ctx, "BCDF-GHJK"); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, "BCDF-GHJK", ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("wrong code: %v, want ErrBadCode", err)
 	}
 
 	*now = now.Add(c.LoginTTL)
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("expired code: %v, want ErrBadCode", err)
 	}
 	if s, _ := poll(t, c, login.DeviceCode); s != PollExpired {
@@ -106,15 +106,15 @@ func TestTooManyWrongCodes(t *testing.T) {
 	ctx := context.Background()
 	login, _ := c.StartLogin(ctx, "laptop", "")
 	for i := 0; i < c.MaxTries; i++ {
-		c.Approve(ctx, "BCDF-GHJK")
+		c.Approve(ctx, "BCDF-GHJK", "")
 	}
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrTooManyTries) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrTooManyTries) {
 		t.Fatalf("right code after %d wrong codes: %v, want ErrTooManyTries", c.MaxTries, err)
 	}
 
 	*now = now.Add(c.TriesWindow)
 	login, _ = c.StartLogin(ctx, "laptop", "")
-	if err := c.Approve(ctx, login.UserCode); err != nil {
+	if err := c.Approve(ctx, login.UserCode, ""); err != nil {
 		t.Fatalf("after the window: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func approvedKey(t *testing.T, c *CLI) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Approve(ctx, login.UserCode); err != nil {
+	if err := c.Approve(ctx, login.UserCode, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, key := poll(t, c, login.DeviceCode)
@@ -232,4 +232,55 @@ func approvedKey(t *testing.T, c *CLI) string {
 		t.Fatal("no key")
 	}
 	return key
+}
+
+func TestApprovalSetsDeviceName(t *testing.T) {
+	c, now := newCLI(t)
+	ctx := context.Background()
+	for _, tc := range []struct{ typed, want string }{
+		{"  Work laptop ", "Work laptop"},
+		{"", "DESKTOP-HQOQ832"}, // empty keeps the name that the CLI sent
+	} {
+		login, _ := c.StartLogin(ctx, "DESKTOP-HQOQ832", "")
+		if err := c.Approve(ctx, login.UserCode, tc.typed); err != nil {
+			t.Fatal(err)
+		}
+		*now = now.Add(c.PollEvery)
+		_, key, err := c.Poll(ctx, login.DeviceCode)
+		if err != nil || key.DeviceName != tc.want {
+			t.Fatalf("typed %q: device name %q, want %q (%v)", tc.typed, key.DeviceName, tc.want, err)
+		}
+	}
+
+	// A bad name is not a wrong code, and the login stays open.
+	login, _ := c.StartLogin(ctx, "laptop", "")
+	if err := c.Approve(ctx, login.UserCode, strings.Repeat("a", 65)); !errors.Is(err, ErrBadName) {
+		t.Fatalf("long name: %v", err)
+	}
+	if s, _ := poll(t, c, login.DeviceCode); s != PollWait {
+		t.Fatalf("after bad name: %q, want wait", s)
+	}
+}
+
+func TestRenameKey(t *testing.T) {
+	c, _ := newCLI(t)
+	ctx := context.Background()
+	key := approvedKey(t, c)
+	k, _, _ := c.CheckKey(ctx, key)
+
+	got, err := c.Rename(ctx, k.ID, " Home PC ")
+	if err != nil || got != "Home PC" {
+		t.Fatalf("rename: %q, %v", got, err)
+	}
+	if k, _, _ := c.CheckKey(ctx, key); k.DeviceName != "Home PC" {
+		t.Fatalf("after rename: %q", k.DeviceName)
+	}
+	for _, bad := range []string{"", "   ", strings.Repeat("é", 65), "a\x1b[31mb", "a\nb"} {
+		if _, err := c.Rename(ctx, k.ID, bad); !errors.Is(err, ErrBadName) {
+			t.Errorf("rename to %q: %v, want ErrBadName", bad, err)
+		}
+	}
+	if k, _, _ := c.CheckKey(ctx, key); k.DeviceName != "Home PC" {
+		t.Fatalf("a bad name changed the key: %q", k.DeviceName)
+	}
 }

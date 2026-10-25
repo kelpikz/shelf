@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -32,6 +33,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/cli/login", a.startLogin)
 	mux.HandleFunc("POST /api/v1/cli/login/poll", a.poll)
 	mux.HandleFunc("POST /api/v1/cli/logout", a.logout)
+	mux.HandleFunc("PATCH /api/v1/cli/key", a.renameKey)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API request.")
 	})
@@ -82,6 +84,7 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"status": string(status)}
 	if key.Key != "" {
 		resp["key"] = key.Key
+		resp["device_name"] = key.DeviceName
 		resp["expires_at"] = key.ExpiresAt.Unix()
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -97,6 +100,30 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// renameKey sets the device name of the key that sends the request.
+func (a *API) renameKey(w http.ResponseWriter, r *http.Request) {
+	key, ok := a.key(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		DeviceName string `json:"device_name"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	name, err := a.CLI.Rename(r.Context(), key.ID, req.DeviceName)
+	if errors.Is(err, auth.ErrBadName) {
+		writeError(w, http.StatusBadRequest, "bad_name", "A device name has 1 to 64 characters, and no control characters.")
+		return
+	}
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"device_name": name})
 }
 
 // key checks the Bearer key. If the check fails, it writes the response and
@@ -126,11 +153,17 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		writeError(w, http.StatusUnsupportedMediaType, "bad_request", "Send JSON.")
 		return false
 	}
-	// ReadAll then Unmarshal: Unmarshal refuses data after the first value, and
-	// the whole body must fit in maxBody.
+	// The whole body must fit in maxBody. Only the fields in v are allowed,
+	// and nothing may follow the first value.
 	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err == nil {
-		err = json.Unmarshal(b, v)
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.DisallowUnknownFields()
+		if err = dec.Decode(v); err == nil {
+			if _, end := dec.Token(); end != io.EOF {
+				err = errors.New("data after the JSON value")
+			}
+		}
 	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "The JSON body is not valid.")

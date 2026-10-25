@@ -11,6 +11,7 @@ import (
 var siteErrors = map[string]string{
 	"confirm": "Nothing was deleted. Type the path exactly to delete a Site.",
 	"gone":    "That Site does not exist any more.",
+	"name":    "The name did not change. A device name has 1 to 64 characters, and no control characters.",
 }
 
 // siteAction runs one button of the Admin page on one Site.

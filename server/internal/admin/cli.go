@@ -8,6 +8,8 @@ import (
 	"github.com/kelpikz/shelf/server/internal/auth"
 )
 
+const nameError = "A device name has 1 to 64 characters, and no control characters."
+
 var codeErrors = map[error]string{
 	auth.ErrBadCode:      "The code is wrong or expired. Check the code in your terminal.",
 	auth.ErrTooManyTries: "Too many wrong codes. Wait 10 minutes and try again.",
@@ -42,12 +44,21 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		}
 	case "approve", "deny":
 		if step == "approve" {
-			err = a.CLI.Approve(ctx, code)
+			err = a.CLI.Approve(ctx, code, r.PostFormValue("device_name"))
 		} else {
 			err = a.CLI.Deny(ctx, code)
 		}
 		if err == nil {
 			page["Step"], page["Approved"] = "done", step == "approve"
+		}
+		// The login is still open; show it again with the error.
+		if errors.Is(err, auth.ErrBadName) {
+			var login auth.PendingLogin
+			if login, err = a.CLI.Find(ctx, code); err == nil {
+				page["Step"], page["Login"], page["Error"] = "confirm", login, nameError
+				a.render(w, http.StatusBadRequest, "cli.html", page)
+				return
+			}
 		}
 	default:
 		http.NotFound(w, r)
@@ -66,6 +77,28 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, http.StatusOK, "cli.html", page)
+}
+
+// renameKey sets the device name of one CLI key from the "CLI keys" list.
+func (a *App) renameKey(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.checkPost(w, r); !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	_, err = a.CLI.Rename(r.Context(), id, r.PostFormValue("device_name"))
+	if errors.Is(err, auth.ErrBadName) {
+		http.Redirect(w, r, "/?error=name", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // revokeKey cancels one CLI key from the "CLI keys" list.

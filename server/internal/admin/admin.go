@@ -46,6 +46,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /cli/approve", a.cliApprovePage)
 	mux.HandleFunc("POST /cli/approve/{step}", a.cliApproveStep)
 	mux.HandleFunc("POST /cli/keys/{id}/revoke", a.revokeKey)
+	mux.HandleFunc("POST /cli/keys/{id}/rename", a.renameKey)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
