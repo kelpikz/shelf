@@ -68,7 +68,9 @@ type Key struct {
 
 // KeyChanges is the whitelist of Key fields that can change. A nil field
 // stays the same. To add a field: add it here, check it and SET it in
-// UpdateKey, and read it in admin updateKey.
+// UpdateKey, and read it in admin updateKey. The CLI key itself can change
+// every field here (PATCH /api/v1/cli/key); an Owner-only field needs its
+// own type.
 type KeyChanges struct {
 	DeviceName *string `json:"device_name"`
 }
