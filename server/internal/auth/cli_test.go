@@ -264,7 +264,7 @@ func TestApprovalSetsDeviceName(t *testing.T) {
 }
 
 func TestUpdateKey(t *testing.T) {
-	c, _ := newCLI(t)
+	c, now := newCLI(t)
 	ctx := context.Background()
 	key := approvedKey(t, c)
 	k, _, _ := c.CheckKey(ctx, key)
@@ -287,6 +287,11 @@ func TestUpdateKey(t *testing.T) {
 	}
 	if _, ok, err := c.UpdateKey(ctx, k.ID+100, KeyChanges{DeviceName: ptr("x")}); ok || err != nil {
 		t.Fatalf("unknown id: %v, %v", ok, err)
+	}
+	// The row stays until the next StartLogin cleanup.
+	*now = now.Add(c.KeyTTL)
+	if _, ok, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: ptr("x")}); ok || err != nil {
+		t.Fatalf("expired key: %v, %v", ok, err)
 	}
 }
 

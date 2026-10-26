@@ -639,7 +639,7 @@ func TestCLIUpdatesItsKey(t *testing.T) {
 
 	resp := ts.api("PATCH", "/cli/key", key, map[string]string{"device_name": "Home PC"})
 	if got := decode[keyAnswer](t, resp); resp.StatusCode != http.StatusOK || got.DeviceName != "Home PC" || got.ExpiresAt == 0 {
-		t.Fatalf("rename: got %d %v", resp.StatusCode, got)
+		t.Fatalf("update: got %d %v", resp.StatusCode, got)
 	}
 	c, _ := ts.login(t)
 	if page := body(ts.adminGet(c, "/")); !strings.Contains(page, "Home PC") {
@@ -676,10 +676,10 @@ func TestOwnerUpdatesCLIKey(t *testing.T) {
 
 	resp := ts.adminPost(c, adminURL, path, url.Values{"csrf": {csrf}, "device_name": {"Work laptop"}})
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
-		t.Fatalf("rename: got %d to %q", resp.StatusCode, resp.Header.Get("Location"))
+		t.Fatalf("update: got %d to %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	if k, _, _ := ts.cli.CheckKey(ctx, key); k.DeviceName != "Work laptop" {
-		t.Fatalf("after rename: %q", k.DeviceName)
+		t.Fatalf("after update: %q", k.DeviceName)
 	}
 
 	resp = ts.adminPost(c, adminURL, path, url.Values{"csrf": {csrf}, "device_name": {"  "}})

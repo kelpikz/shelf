@@ -67,7 +67,8 @@ type Key struct {
 }
 
 // KeyChanges is the whitelist of Key fields that can change. A nil field
-// stays the same. A new field needs a check in UpdateKey.
+// stays the same. To add a field: add it here, check it and SET it in
+// UpdateKey, and read it in admin updateKey.
 type KeyChanges struct {
 	DeviceName *string `json:"device_name"`
 }
@@ -352,7 +353,7 @@ func (c *CLI) Keys(ctx context.Context) ([]Key, error) {
 }
 
 // UpdateKey applies the changes to a CLI key and gives the stored key. An
-// unknown id gives false, not an error.
+// unknown or expired id gives false, not an error.
 func (c *CLI) UpdateKey(ctx context.Context, id int64, ch KeyChanges) (Key, bool, error) {
 	if ch.DeviceName != nil {
 		name, err := checkDeviceName(*ch.DeviceName)
@@ -361,13 +362,13 @@ func (c *CLI) UpdateKey(ctx context.Context, id int64, ch KeyChanges) (Key, bool
 		}
 		ch.DeviceName = &name
 	}
-	// NULL keeps the old value.
 	var k Key
 	var created, expires, used int64
+	// NULL keeps the old value.
 	err := c.db.QueryRowContext(ctx,
-		`UPDATE cli_keys SET device_name = COALESCE(?, device_name) WHERE id = ?
+		`UPDATE cli_keys SET device_name = COALESCE(?, device_name) WHERE id = ? AND expires_at > ?
 		 RETURNING id, device_name, created_at, expires_at, last_used_at`,
-		ch.DeviceName, id).Scan(&k.ID, &k.DeviceName, &created, &expires, &used)
+		ch.DeviceName, id, c.Now().Unix()).Scan(&k.ID, &k.DeviceName, &created, &expires, &used)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Key{}, false, nil
 	}
