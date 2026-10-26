@@ -50,7 +50,7 @@ func TestCLILoginGivesKeyOnce(t *testing.T) {
 	}
 
 	// The Owner types the code in lower case, with the dash.
-	if err := c.Approve(ctx, "  "+strings.ToLower(login.UserCode)+" "); err != nil {
+	if err := c.Approve(ctx, "  "+strings.ToLower(login.UserCode)+" ", ""); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(c.PollEvery)
@@ -78,7 +78,7 @@ func TestDeniedLoginGivesNoKey(t *testing.T) {
 	if s, key := poll(t, c, login.DeviceCode); s != PollDenied || key != "" {
 		t.Fatalf("poll: %q, key %q", s, key)
 	}
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("approve after deny: %v, want ErrBadCode", err)
 	}
 }
@@ -88,12 +88,12 @@ func TestWrongOrExpiredCodeRefused(t *testing.T) {
 	ctx := context.Background()
 	login, _ := c.StartLogin(ctx, "laptop", "")
 
-	if err := c.Approve(ctx, "BCDF-GHJK"); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, "BCDF-GHJK", ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("wrong code: %v, want ErrBadCode", err)
 	}
 
 	*now = now.Add(c.LoginTTL)
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrBadCode) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("expired code: %v, want ErrBadCode", err)
 	}
 	if s, _ := poll(t, c, login.DeviceCode); s != PollExpired {
@@ -106,15 +106,15 @@ func TestTooManyWrongCodes(t *testing.T) {
 	ctx := context.Background()
 	login, _ := c.StartLogin(ctx, "laptop", "")
 	for i := 0; i < c.MaxTries; i++ {
-		c.Approve(ctx, "BCDF-GHJK")
+		c.Approve(ctx, "BCDF-GHJK", "")
 	}
-	if err := c.Approve(ctx, login.UserCode); !errors.Is(err, ErrTooManyTries) {
+	if err := c.Approve(ctx, login.UserCode, ""); !errors.Is(err, ErrTooManyTries) {
 		t.Fatalf("right code after %d wrong codes: %v, want ErrTooManyTries", c.MaxTries, err)
 	}
 
 	*now = now.Add(c.TriesWindow)
 	login, _ = c.StartLogin(ctx, "laptop", "")
-	if err := c.Approve(ctx, login.UserCode); err != nil {
+	if err := c.Approve(ctx, login.UserCode, ""); err != nil {
 		t.Fatalf("after the window: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func approvedKey(t *testing.T, c *CLI) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Approve(ctx, login.UserCode); err != nil {
+	if err := c.Approve(ctx, login.UserCode, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, key := poll(t, c, login.DeviceCode)
@@ -233,3 +233,66 @@ func approvedKey(t *testing.T, c *CLI) string {
 	}
 	return key
 }
+
+func TestApprovalSetsDeviceName(t *testing.T) {
+	c, now := newCLI(t)
+	ctx := context.Background()
+	for _, tc := range []struct{ typed, want string }{
+		{"  Work laptop ", "Work laptop"},
+		{"", "DESKTOP-HQOQ832"}, // empty keeps the name that the CLI sent
+		{"   ", "DESKTOP-HQOQ832"},
+	} {
+		login, _ := c.StartLogin(ctx, "DESKTOP-HQOQ832", "")
+		if err := c.Approve(ctx, login.UserCode, tc.typed); err != nil {
+			t.Fatal(err)
+		}
+		*now = now.Add(c.PollEvery)
+		_, key, err := c.Poll(ctx, login.DeviceCode)
+		if err != nil || key.DeviceName != tc.want {
+			t.Fatalf("typed %q: device name %q, want %q (%v)", tc.typed, key.DeviceName, tc.want, err)
+		}
+	}
+
+	// A bad name is not a wrong code, and the login stays open.
+	login, _ := c.StartLogin(ctx, "laptop", "")
+	if err := c.Approve(ctx, login.UserCode, strings.Repeat("a", 65)); !errors.Is(err, ErrBadName) {
+		t.Fatalf("long name: %v", err)
+	}
+	if s, _ := poll(t, c, login.DeviceCode); s != PollWait {
+		t.Fatalf("after bad name: %q, want wait", s)
+	}
+}
+
+func TestUpdateKey(t *testing.T) {
+	c, now := newCLI(t)
+	ctx := context.Background()
+	key := approvedKey(t, c)
+	k, _, _ := c.CheckKey(ctx, key)
+
+	got, ok, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: ptr(" Home PC ")})
+	if err != nil || !ok || got.DeviceName != "Home PC" || got.ID != k.ID || !got.ExpiresAt.Equal(k.ExpiresAt) {
+		t.Fatalf("update: %+v, %v, %v", got, ok, err)
+	}
+	if k, _, _ := c.CheckKey(ctx, key); k.DeviceName != "Home PC" {
+		t.Fatalf("after update: %q", k.DeviceName)
+	}
+	for _, bad := range []string{"", "   ", strings.Repeat("é", 65), "a\x1b[31mb", "a\nb"} {
+		if _, _, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: &bad}); !errors.Is(err, ErrBadName) {
+			t.Errorf("name %q: %v, want ErrBadName", bad, err)
+		}
+	}
+	// A nil field stays the same.
+	if got, _, err := c.UpdateKey(ctx, k.ID, KeyChanges{}); err != nil || got.DeviceName != "Home PC" {
+		t.Fatalf("no changes: %q, %v", got.DeviceName, err)
+	}
+	if _, ok, err := c.UpdateKey(ctx, k.ID+100, KeyChanges{DeviceName: ptr("x")}); ok || err != nil {
+		t.Fatalf("unknown id: %v, %v", ok, err)
+	}
+	// The row stays until the next StartLogin cleanup.
+	*now = now.Add(c.KeyTTL)
+	if _, ok, err := c.UpdateKey(ctx, k.ID, KeyChanges{DeviceName: ptr("x")}); ok || err != nil {
+		t.Fatalf("expired key: %v, %v", ok, err)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

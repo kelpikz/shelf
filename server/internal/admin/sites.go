@@ -5,12 +5,14 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
 var siteErrors = map[string]string{
 	"confirm": "Nothing was deleted. Type the path exactly to delete a Site.",
 	"gone":    "That Site does not exist any more.",
+	"name":    "The name did not change. " + auth.BadNameMessage,
 }
 
 // siteAction runs one button of the Admin page on one Site.

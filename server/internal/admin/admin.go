@@ -46,6 +46,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /cli/approve", a.cliApprovePage)
 	mux.HandleFunc("POST /cli/approve/{step}", a.cliApproveStep)
 	mux.HandleFunc("POST /cli/keys/{id}/revoke", a.revokeKey)
+	mux.HandleFunc("POST /cli/keys/{id}/update", a.updateKey)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
@@ -89,6 +90,6 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	}
 	a.render(w, http.StatusOK, "sites.html", map[string]any{
 		"Session": sess, "Sites": live, "Archived": archived, "Keys": keys, "FilesURL": a.FilesURL,
-		"Error": siteErrors[r.URL.Query().Get("error")],
+		"Now": a.CLI.Now(), "Error": siteErrors[r.URL.Query().Get("error")],
 	})
 }

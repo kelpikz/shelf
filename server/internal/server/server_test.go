@@ -131,8 +131,12 @@ func (ts *testServer) adminPost(c *http.Cookie, origin, path string, form url.Va
 
 // apiPost sends a JSON request to the CLI API, with the key if it is set.
 func (ts *testServer) apiPost(path, key string, payload any) *http.Response {
+	return ts.api("POST", path, key, payload)
+}
+
+func (ts *testServer) api(method, path, key string, payload any) *http.Response {
 	b, _ := json.Marshal(payload)
-	r := httptest.NewRequest("POST", adminURL+"/api/v1"+path, bytes.NewReader(b))
+	r := httptest.NewRequest(method, adminURL+"/api/v1"+path, bytes.NewReader(b))
 	r.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		r.Header.Set("Authorization", "Bearer "+key)
@@ -158,9 +162,10 @@ type cliLogin struct {
 }
 
 type pollAnswer struct {
-	Status    string `json:"status"`
-	Key       string `json:"key"`
-	ExpiresAt int64  `json:"expires_at"`
+	Status     string `json:"status"`
+	Key        string `json:"key"`
+	ExpiresAt  int64  `json:"expires_at"`
+	DeviceName string `json:"device_name"`
 }
 
 func body(resp *http.Response) string {
@@ -495,12 +500,13 @@ func TestCLILoginOverAPI(t *testing.T) {
 	if page := body(resp); resp.StatusCode != http.StatusOK || !strings.Contains(page, "laptop") {
 		t.Fatalf("check: got %d, device name missing", resp.StatusCode)
 	}
-	resp = ts.adminPost(c, adminURL, "/cli/approve/approve", url.Values{"csrf": {csrf}, "code": {login.UserCode}})
+	// The Owner changes the device name before approving.
+	resp = ts.adminPost(c, adminURL, "/cli/approve/approve", url.Values{"csrf": {csrf}, "code": {login.UserCode}, "device_name": {"Work laptop"}})
 	if page := body(resp); resp.StatusCode != http.StatusOK || !strings.Contains(page, "CLI approved") {
 		t.Fatalf("approve: got %d", resp.StatusCode)
 	}
 	got := poll()
-	if got.Status != "approved" || got.Key == "" {
+	if got.Status != "approved" || got.Key == "" || got.DeviceName != "Work laptop" {
 		t.Fatalf("after approval: %+v", got)
 	}
 	// The CLI shows this date in `shelf status`.
@@ -557,7 +563,7 @@ func TestOwnerCancelsCLIKey(t *testing.T) {
 	ts := newServer(t)
 	ctx := context.Background()
 	login, _ := ts.cli.StartLogin(ctx, "work-pc", "")
-	ts.cli.Approve(ctx, login.UserCode)
+	ts.cli.Approve(ctx, login.UserCode, "")
 	_, newKey, _ := ts.cli.Poll(ctx, login.DeviceCode)
 	key := newKey.Key
 	k, _, _ := ts.cli.CheckKey(ctx, key)
@@ -566,13 +572,26 @@ func TestOwnerCancelsCLIKey(t *testing.T) {
 	if page := body(ts.adminGet(c, "/")); !strings.Contains(page, "work-pc") {
 		t.Fatal("the key is not on the Admin page")
 	}
-	resp := ts.adminPost(c, adminURL, "/cli/keys/"+strconv.FormatInt(k.ID, 10)+"/revoke", url.Values{"csrf": {csrf}})
+	// shelf status asks the server about its key.
+	resp := ts.api("GET", "/cli/key", key, nil)
+	if got := decode[keyAnswer](t, resp); resp.StatusCode != http.StatusOK || got.DeviceName != "work-pc" || got.ExpiresAt != k.ExpiresAt.Unix() {
+		t.Fatalf("key info: got %d %+v", resp.StatusCode, got)
+	}
+	resp = ts.adminPost(c, adminURL, "/cli/keys/"+strconv.FormatInt(k.ID, 10)+"/revoke", url.Values{"csrf": {csrf}})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("revoke: got %d", resp.StatusCode)
 	}
 	if _, ok, _ := ts.cli.CheckKey(ctx, key); ok {
 		t.Fatal("key works after cancel")
 	}
+	if resp := ts.api("GET", "/cli/key", key, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("key info after cancel: got %d", resp.StatusCode)
+	}
+}
+
+type keyAnswer struct {
+	DeviceName string `json:"device_name"`
+	ExpiresAt  int64  `json:"expires_at"`
 }
 
 func TestAPIRefusesBadJSON(t *testing.T) {
@@ -581,6 +600,7 @@ func TestAPIRefusesBadJSON(t *testing.T) {
 		"trailing text": `{"device_name":"a"} junk`,
 		"two objects":   `{"device_name":"a"}{"device_name":"b"}`,
 		"too large":     `{"device_name":"a"}` + strings.Repeat(" ", 8<<10),
+		"unknown field": `{"device_name":"a","admin":true}`,
 	} {
 		r := httptest.NewRequest("POST", adminURL+"/api/v1/cli/login", strings.NewReader(payload))
 		r.Header.Set("Content-Type", "application/json")
@@ -595,5 +615,81 @@ func TestAPIRefusesBadJSON(t *testing.T) {
 		if _, err := ts.cli.StartLogin(context.Background(), "laptop", ""); err != nil {
 			t.Fatalf("login %d: %v", i+1, err)
 		}
+	}
+}
+
+// apiKey logs in a CLI and gives its key.
+func (ts *testServer) apiKey(t *testing.T, deviceName string) string {
+	t.Helper()
+	ctx := context.Background()
+	login, _ := ts.cli.StartLogin(ctx, deviceName, "")
+	if err := ts.cli.Approve(ctx, login.UserCode, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := ts.cli.Poll(ctx, login.DeviceCode)
+	if err != nil || key.Key == "" {
+		t.Fatalf("no key: %v", err)
+	}
+	return key.Key
+}
+
+func TestCLIUpdatesItsKey(t *testing.T) {
+	ts := newServer(t)
+	key := ts.apiKey(t, "DESKTOP-HQOQ832")
+
+	resp := ts.api("PATCH", "/cli/key", key, map[string]string{"device_name": "Home PC"})
+	if got := decode[keyAnswer](t, resp); resp.StatusCode != http.StatusOK || got.DeviceName != "Home PC" || got.ExpiresAt == 0 {
+		t.Fatalf("update: got %d %v", resp.StatusCode, got)
+	}
+	c, _ := ts.login(t)
+	if page := body(ts.adminGet(c, "/")); !strings.Contains(page, "Home PC") {
+		t.Fatal("the new name is not on the Admin page")
+	}
+
+	for name, tc := range map[string]struct {
+		key     string
+		payload any
+		status  int
+		code    string
+	}{
+		"bad name":      {key, map[string]string{"device_name": ""}, http.StatusBadRequest, "bad_name"},
+		"unknown field": {key, map[string]any{"device_name": "x", "expires_at": 0}, http.StatusBadRequest, "bad_request"},
+		"no key":        {"", map[string]string{"device_name": "x"}, http.StatusUnauthorized, "unauthorized"},
+	} {
+		resp := ts.api("PATCH", "/cli/key", tc.key, tc.payload)
+		if resp.StatusCode != tc.status || !strings.Contains(body(resp), `"code":"`+tc.code+`"`) {
+			t.Errorf("%s: got %d, want %d %s", name, resp.StatusCode, tc.status, tc.code)
+		}
+	}
+	if k, _, _ := ts.cli.CheckKey(context.Background(), key); k.DeviceName != "Home PC" {
+		t.Fatalf("a refused request changed the name: %q", k.DeviceName)
+	}
+}
+
+func TestOwnerUpdatesCLIKey(t *testing.T) {
+	ts := newServer(t)
+	ctx := context.Background()
+	key := ts.apiKey(t, "DESKTOP-HQOQ832")
+	k, _, _ := ts.cli.CheckKey(ctx, key)
+	c, csrf := ts.login(t)
+	path := "/cli/keys/" + strconv.FormatInt(k.ID, 10) + "/update"
+
+	resp := ts.adminPost(c, adminURL, path, url.Values{"csrf": {csrf}, "device_name": {"Work laptop"}})
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
+		t.Fatalf("update: got %d to %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if k, _, _ := ts.cli.CheckKey(ctx, key); k.DeviceName != "Work laptop" {
+		t.Fatalf("after update: %q", k.DeviceName)
+	}
+
+	resp = ts.adminPost(c, adminURL, path, url.Values{"csrf": {csrf}, "device_name": {"  "}})
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusSeeOther || loc != "/?error=name" {
+		t.Fatalf("bad name: got %d to %q", resp.StatusCode, loc)
+	}
+	if page := body(ts.adminGet(c, "/?error=name")); !strings.Contains(page, "device name") {
+		t.Fatal("no message for a bad name")
+	}
+	if resp := ts.adminPost(c, filesURL, path, url.Values{"csrf": {csrf}, "device_name": {"x"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("other origin: got %d", resp.StatusCode)
 	}
 }

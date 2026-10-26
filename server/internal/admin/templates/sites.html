@@ -46,9 +46,19 @@
     <div class="site">
       <div class="site-info">
         <strong>{{.DeviceName}}</strong>
-        <span class="muted small">made {{.CreatedAt.UTC.Format "2 Jan 2006"}} · ends {{.ExpiresAt.UTC.Format "2 Jan 2006"}} · last used {{.LastUsedAt.UTC.Format "2 Jan 2006"}}</span>
+        <span class="muted small">made {{.CreatedAt.UTC.Format "2 Jan 2006"}} · <span title="{{.ExpiresAt.UTC.Format "2 Jan 2006, 15:04"}} UTC">{{endsIn $.Now .ExpiresAt}}</span> · last used {{.LastUsedAt.UTC.Format "2 Jan 2006"}}</span>
       </div>
       <div class="site-actions">
+        <details class="inline-form">
+          <summary class="btn btn-ghost btn-small">Edit</summary>
+          <form method="post" action="/cli/keys/{{.ID}}/update">
+            <input type="hidden" name="csrf" value="{{$.Session.CSRF}}">
+            <label>Device name
+              <input name="device_name" value="{{.DeviceName}}" autocomplete="off" spellcheck="false" required>
+            </label>
+            <button class="btn btn-github btn-small">Save</button>
+          </form>
+        </details>
         <form method="post" action="/cli/keys/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.Session.CSRF}}"><button class="btn btn-ghost btn-small">Cancel</button></form>
       </div>
     </div>

@@ -15,18 +15,21 @@
     <h1>Approve this CLI?</h1>
     <p class="muted">It gets a key that can manage your Sites for 30 days.</p>
     <div class="code-show">{{.UserCode}}</div>
+    {{with $.Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
     <dl class="facts">
-      <dt>Device</dt><dd>{{.DeviceName}}</dd>
       <dt>IP</dt><dd>{{.IP}}</dd>
       <dt>Started</dt><dd>{{.CreatedAt.UTC.Format "15:04:05"}} UTC</dd>
     </dl>
+    <label class="field-label" for="device_name">Device name</label>
+    <input class="text-input" id="device_name" name="device_name" form="approve-form" value="{{.DeviceName}}"
+      autocomplete="off" spellcheck="false">
     <div class="choice">
       <form method="post" action="/cli/approve/deny">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="code" value="{{.UserCode}}">
         <button class="btn btn-ghost">Deny</button>
       </form>
-      <form method="post" action="/cli/approve/approve">
+      <form id="approve-form" method="post" action="/cli/approve/approve">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="code" value="{{.UserCode}}">
         <button class="btn btn-github">Approve</button>

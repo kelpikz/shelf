@@ -33,6 +33,7 @@ mod tests {
 
     fn key() -> SavedKey {
         SavedKey {
+            device_name: String::new(),
             key: "shelf_abc".into(),
             expires_at: 1_800_000_000,
         }

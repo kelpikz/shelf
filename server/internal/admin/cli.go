@@ -42,12 +42,21 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		}
 	case "approve", "deny":
 		if step == "approve" {
-			err = a.CLI.Approve(ctx, code)
+			err = a.CLI.Approve(ctx, code, r.PostFormValue("device_name"))
 		} else {
 			err = a.CLI.Deny(ctx, code)
 		}
 		if err == nil {
 			page["Step"], page["Approved"] = "done", step == "approve"
+		}
+		// The login is still open; show it again with the error.
+		if errors.Is(err, auth.ErrBadName) {
+			var login auth.PendingLogin
+			if login, err = a.CLI.Find(ctx, code); err == nil {
+				page["Step"], page["Login"], page["Error"] = "confirm", login, auth.BadNameMessage
+				a.render(w, http.StatusBadRequest, "cli.html", page)
+				return
+			}
 		}
 	default:
 		http.NotFound(w, r)
@@ -66,6 +75,34 @@ func (a *App) cliApproveStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, http.StatusOK, "cli.html", page)
+}
+
+// updateKey changes one CLI key from the "CLI keys" list. Only the form
+// fields in auth.KeyChanges are read.
+func (a *App) updateKey(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.checkPost(w, r); !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var ch auth.KeyChanges
+	if r.PostForm.Has("device_name") {
+		name := r.PostForm.Get("device_name")
+		ch.DeviceName = &name
+	}
+	_, _, err = a.CLI.UpdateKey(r.Context(), id, ch) // an unknown id was cancelled; the list no longer has it
+	if errors.Is(err, auth.ErrBadName) {
+		http.Redirect(w, r, "/?error=name", http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		a.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // revokeKey cancels one CLI key from the "CLI keys" list.

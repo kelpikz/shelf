@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // PollStatus is the answer to a CLI poll. Names follow RFC 8628.
@@ -25,7 +27,13 @@ var (
 	ErrBadCode       = errors.New("the code is wrong or expired")
 	ErrTooManyTries  = errors.New("too many wrong codes, try again later")
 	ErrTooManyLogins = errors.New("too many open CLI logins, try again later")
+	ErrBadName       = errors.New("bad device name")
 )
+
+const maxDeviceName = 64 // runes
+
+// BadNameMessage explains ErrBadName to the Owner.
+var BadNameMessage = fmt.Sprintf("A device name has 1 to %d characters, and no control characters.", maxDeviceName)
 
 // KeyPrefix starts every CLI key, so a leaked key is easy to find.
 const KeyPrefix = "shelf_"
@@ -44,8 +52,9 @@ type Login struct {
 
 // NewKey is a key that Poll gives once, on approval.
 type NewKey struct {
-	Key       string
-	ExpiresAt time.Time
+	Key        string
+	DeviceName string
+	ExpiresAt  time.Time
 }
 
 // Key is a CLI key record. It never holds the key itself.
@@ -55,6 +64,15 @@ type Key struct {
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	LastUsedAt time.Time
+}
+
+// KeyChanges is the whitelist of Key fields that can change. A nil field
+// stays the same. To add a field: add it here, check it and SET it in
+// UpdateKey, and read it in admin updateKey. The CLI key itself can change
+// every field here (PATCH /api/v1/cli/key); an Owner-only field needs its
+// own type.
+type KeyChanges struct {
+	DeviceName *string `json:"device_name"`
 }
 
 // CLI runs the device flow for the CLI and checks CLI keys. The tables hold
@@ -132,14 +150,21 @@ func (c *CLI) StartLogin(ctx context.Context, deviceName, ip string) (Login, err
 }
 
 // Approve lets the CLI with this user code get a key on its next poll.
+// A deviceName that is not blank replaces the name that the CLI sent.
 // The caller must check the Owner session and the CSRF token first.
-func (c *CLI) Approve(ctx context.Context, userCode string) error {
-	return c.decide(ctx, userCode, "approved")
+func (c *CLI) Approve(ctx context.Context, userCode, deviceName string) error {
+	if deviceName = strings.TrimSpace(deviceName); deviceName != "" {
+		var err error
+		if deviceName, err = checkDeviceName(deviceName); err != nil {
+			return err
+		}
+	}
+	return c.decide(ctx, userCode, "approved", deviceName)
 }
 
 // Deny ends the login. The CLI gets PollDenied.
 func (c *CLI) Deny(ctx context.Context, userCode string) error {
-	return c.decide(ctx, userCode, "denied")
+	return c.decide(ctx, userCode, "denied", "")
 }
 
 // PendingLogin is an open login, for the approval page.
@@ -178,7 +203,9 @@ func (c *CLI) Find(ctx context.Context, userCode string) (PendingLogin, error) {
 	return p, nil
 }
 
-func (c *CLI) decide(ctx context.Context, userCode, status string) error {
+// decide sets the status of a pending login. An empty deviceName keeps the
+// old name.
+func (c *CLI) decide(ctx context.Context, userCode, status, deviceName string) error {
 	now := c.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,8 +214,9 @@ func (c *CLI) decide(ctx context.Context, userCode, status string) error {
 	}
 
 	res, err := c.db.ExecContext(ctx,
-		`UPDATE cli_logins SET status = ? WHERE user_code = ? AND status = 'pending' AND expires_at > ?`,
-		status, normalizeUserCode(userCode), now.Unix())
+		`UPDATE cli_logins SET status = ?, device_name = COALESCE(NULLIF(?, ''), device_name)
+		 WHERE user_code = ? AND status = 'pending' AND expires_at > ?`,
+		status, deviceName, normalizeUserCode(userCode), now.Unix())
 	if err != nil {
 		return err
 	}
@@ -263,7 +291,7 @@ func (c *CLI) Poll(ctx context.Context, deviceCode string) (PollStatus, NewKey, 
 		return PollExpired, NewKey{}, nil
 	}
 	// Whole seconds, so the answer has the same expires_at as the row.
-	key := NewKey{Key: KeyPrefix + RandomToken(), ExpiresAt: time.Unix(now.Add(c.KeyTTL).Unix(), 0)}
+	key := NewKey{Key: KeyPrefix + RandomToken(), DeviceName: deviceName, ExpiresAt: time.Unix(now.Add(c.KeyTTL).Unix(), 0)}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO cli_keys (key_hash, device_name, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)`,
 		hash(key.Key), deviceName, now.Unix(), key.ExpiresAt.Unix(), now.Unix())
@@ -326,6 +354,33 @@ func (c *CLI) Keys(ctx context.Context) ([]Key, error) {
 	return keys, rows.Err()
 }
 
+// UpdateKey applies the changes to a CLI key and gives the stored key. An
+// unknown or expired id gives false, not an error.
+func (c *CLI) UpdateKey(ctx context.Context, id int64, ch KeyChanges) (Key, bool, error) {
+	if ch.DeviceName != nil {
+		name, err := checkDeviceName(*ch.DeviceName)
+		if err != nil {
+			return Key{}, false, err
+		}
+		ch.DeviceName = &name
+	}
+	var k Key
+	var created, expires, used int64
+	// NULL keeps the old value.
+	err := c.db.QueryRowContext(ctx,
+		`UPDATE cli_keys SET device_name = COALESCE(?, device_name) WHERE id = ? AND expires_at > ?
+		 RETURNING id, device_name, created_at, expires_at, last_used_at`,
+		ch.DeviceName, id, c.Now().Unix()).Scan(&k.ID, &k.DeviceName, &created, &expires, &used)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Key{}, false, nil
+	}
+	if err != nil {
+		return Key{}, false, err
+	}
+	k.CreatedAt, k.ExpiresAt, k.LastUsedAt = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(used, 0)
+	return k, true, nil
+}
+
 // Revoke deletes a CLI key. An unknown id is not an error.
 func (c *CLI) Revoke(ctx context.Context, id int64) error {
 	_, err := c.db.ExecContext(ctx, `DELETE FROM cli_keys WHERE id = ?`, id)
@@ -351,13 +406,25 @@ func normalizeUserCode(s string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(s))
 }
 
+// checkDeviceName checks a name that the Owner typed. Control characters
+// could change the terminal or the page layout.
+func checkDeviceName(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if n := len([]rune(s)); n == 0 || n > maxDeviceName || strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return "", ErrBadName
+	}
+	return s, nil
+}
+
+// cleanDeviceName fixes the name that the CLI sent; the Owner sees it before
+// approval.
 func cleanDeviceName(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "unknown"
 	}
-	if r := []rune(s); len(r) > 64 {
-		s = string(r[:64])
+	if r := []rune(s); len(r) > maxDeviceName {
+		s = string(r[:maxDeviceName])
 	}
 	return s
 }
