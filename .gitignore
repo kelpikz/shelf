@@ -10,3 +10,6 @@ research/
 
 # Local server data (SQLite and Site files)
 server/data/
+
+# Rust build output
+cli/target/

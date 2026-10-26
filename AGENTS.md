@@ -4,7 +4,7 @@
 
 ## Status
 
-Building v1. The server has the GitHub login and the Admin page sessions. The Sites part, the CLI, and the deploy are not built yet. The planning map shows the open tickets.
+Building v1. The server has the GitHub login, the Admin page, the Sites part, Serving, and the CLI login API. The CLI has `shelf login`, `shelf logout`, and `shelf status`. These are not built yet: the Sites API for the CLI, the Upload checks, the Site commands in the CLI, and the deploy. The planning map shows the open tickets.
 
 ## Stack
 

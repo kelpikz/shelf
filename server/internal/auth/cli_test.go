@@ -31,7 +31,7 @@ func poll(t *testing.T, c *CLI, deviceCode string) (PollStatus, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return status, key
+	return status, key.Key
 }
 
 func TestCLILoginGivesKeyOnce(t *testing.T) {

@@ -158,8 +158,9 @@ type cliLogin struct {
 }
 
 type pollAnswer struct {
-	Status string `json:"status"`
-	Key    string `json:"key"`
+	Status    string `json:"status"`
+	Key       string `json:"key"`
+	ExpiresAt int64  `json:"expires_at"`
 }
 
 func body(resp *http.Response) string {
@@ -502,6 +503,10 @@ func TestCLILoginOverAPI(t *testing.T) {
 	if got.Status != "approved" || got.Key == "" {
 		t.Fatalf("after approval: %+v", got)
 	}
+	// The CLI shows this date in `shelf status`.
+	if left := time.Until(time.Unix(got.ExpiresAt, 0)); left < ts.cli.KeyTTL-time.Minute || left > ts.cli.KeyTTL {
+		t.Fatalf("key expiry: %v from now, want %v", left, ts.cli.KeyTTL)
+	}
 
 	if resp := ts.apiPost("/cli/logout", got.Key, nil); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout: got %d", resp.StatusCode)
@@ -553,7 +558,8 @@ func TestOwnerCancelsCLIKey(t *testing.T) {
 	ctx := context.Background()
 	login, _ := ts.cli.StartLogin(ctx, "work-pc", "")
 	ts.cli.Approve(ctx, login.UserCode)
-	_, key, _ := ts.cli.Poll(ctx, login.DeviceCode)
+	_, newKey, _ := ts.cli.Poll(ctx, login.DeviceCode)
+	key := newKey.Key
 	k, _, _ := ts.cli.CheckKey(ctx, key)
 	c, csrf := ts.login(t)
 
