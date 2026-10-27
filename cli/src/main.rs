@@ -1,6 +1,7 @@
 mod checks;
 mod client;
 mod keystore;
+mod links;
 mod login;
 mod ui;
 
