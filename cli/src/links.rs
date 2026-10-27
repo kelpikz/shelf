@@ -3,11 +3,8 @@
 //! breaks. Warnings only: links that JavaScript makes are not seen.
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result};
 use html5gum::{DefaultEmitter, Token, Tokenizer};
 use regex::Regex;
 
@@ -27,15 +24,17 @@ static SCHEME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9+.-]*:").unwrap());
 
 /// Warnings for the links in the .html, .htm, and .css files of an upload.
-/// one_file: the upload is one file, not a folder.
-pub fn check(root: &Path, files: &[String], one_file: bool) -> Result<Vec<String>> {
+/// data[i] is the content of files[i]. one_file: the upload is one file, not a
+/// folder.
+pub fn check(files: &[String], data: &[Vec<u8>], one_file: bool) -> Vec<String> {
     let names: HashSet<&str> = files.iter().map(String::as_str).collect();
     let mut warnings = Vec::new();
-    for f in files {
+    for (f, data) in files.iter().zip(data) {
         let ext = f.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        let text = String::from_utf8_lossy(data);
         let links = match ext.as_deref() {
-            Some("html" | "htm") => html_links(&read(root, f)?),
-            Some("css") => css_links(&read(root, f)?, 1),
+            Some("html" | "htm") => html_links(&text),
+            Some("css") => css_links(&text, 1),
             _ => continue,
         };
         for (line, link) in links {
@@ -44,12 +43,7 @@ pub fn check(root: &Path, files: &[String], one_file: bool) -> Result<Vec<String
             }
         }
     }
-    Ok(warnings)
-}
-
-fn read(root: &Path, name: &str) -> Result<String> {
-    let bytes = fs::read(root.join(name)).with_context(|| format!("Cannot read {name}"))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    warnings
 }
 
 /// (line, link) for each src and href, and each url(...) in a <style> block.

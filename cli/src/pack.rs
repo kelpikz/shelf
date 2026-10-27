@@ -1,8 +1,6 @@
 //! Packs the files of an upload into one .tar.gz, the body of the upload
 //! request.
 
-use std::fs::File;
-
 use anyhow::{Context, Result, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -13,6 +11,8 @@ use crate::checks::Upload;
 /// The server's limit for the .tar.gz (server/internal/sites).
 pub const MAX_UPLOAD: usize = 10 << 20;
 
+/// Packs the bytes that the checks read, not the files on the disk. Only for
+/// an upload with no errors.
 pub fn pack(up: &Upload) -> Result<Vec<u8>> {
     pack_with(up, MAX_UPLOAD)
 }
@@ -25,17 +25,14 @@ fn pack_with(up: &Upload, max: usize) -> Result<Vec<u8>> {
         )
     };
     let mut tar = Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-    for name in &up.files {
-        let path = up.root.join(name);
-        let file = File::open(&path).with_context(|| format!("Cannot read {name}"))?;
-        let size = file.metadata()?.len();
+    for (name, data) in up.files.iter().zip(&up.data) {
         // Only name, size, and mode: no owner, time, or other local data.
         let mut header = Header::new_gnu();
         header.set_entry_type(EntryType::Regular);
-        header.set_size(size);
+        header.set_size(data.len() as u64);
         header.set_mode(0o644);
         // name uses "/" on all systems; tar writes it as it is.
-        tar.append_data(&mut header, name, file)
+        tar.append_data(&mut header, name, data.as_slice())
             .with_context(|| format!("Cannot pack {name}"))?;
         // Stop early; the encoder may still hold some bytes.
         if tar.get_ref().get_ref().len() > max {
@@ -69,9 +66,11 @@ mod tests {
     }
 
     #[test]
-    fn pack_keeps_the_names_with_slashes_and_the_bytes() {
+    fn pack_keeps_the_names_with_slashes_and_the_checked_bytes() {
         let dir = site();
         let up = checks::check(dir.path(), false).unwrap();
+        // A change after the checks does not get into the upload unchecked.
+        fs::write(dir.path().join("index.html"), "changed").unwrap();
         let gz = pack(&up).unwrap();
 
         let mut archive = tar::Archive::new(GzDecoder::new(&gz[..]));
