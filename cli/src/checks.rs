@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::links;
+use crate::{links, secrets};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -41,11 +41,12 @@ pub struct Upload {
     pub errors: Vec<String>, // an error stops the upload
 }
 
-pub fn check(path: &Path) -> Result<Upload> {
-    check_with(path, &LIMITS)
+/// allow_secrets makes a secret a warning, not an error.
+pub fn check(path: &Path, allow_secrets: bool) -> Result<Upload> {
+    check_with(path, &LIMITS, allow_secrets)
 }
 
-fn check_with(path: &Path, limits: &Limits) -> Result<Upload> {
+fn check_with(path: &Path, limits: &Limits, allow_secrets: bool) -> Result<Upload> {
     // Follows a link: the Owner named this path.
     let meta = fs::metadata(path).with_context(|| format!("Cannot open {}", path.display()))?;
     let mut up = Upload {
@@ -104,6 +105,14 @@ fn check_with(path: &Path, limits: &Limits) -> Result<Upload> {
     if up.errors.is_empty() {
         up.warnings
             .extend(links::check(&up.root, &up.files, up.kind == Kind::File)?);
+        for s in secrets::check(&up.root, &up.files)? {
+            if allow_secrets {
+                up.warnings.push(s);
+            } else {
+                up.errors
+                    .push(format!("{s} If it is not a secret, add --allow-secrets."));
+            }
+        }
     }
     Ok(up)
 }
@@ -190,7 +199,7 @@ mod tests {
             "node_modules/x/index.js",
             "__MACOSX/._a.png",
         ]);
-        let up = check(dir.path()).unwrap();
+        let up = check(dir.path(), false).unwrap();
         assert_eq!(up.kind, Kind::Folder);
         assert_eq!(up.root, dir.path());
         assert_eq!(up.files, ["css/site.css", "img/a.png", "index.html"]);
@@ -212,22 +221,22 @@ mod tests {
     #[test]
     fn folder_needs_index_html_at_its_top_with_the_exact_case() {
         let nested = tree(&["about/index.html"]);
-        assert_eq!(check(nested.path()).unwrap().errors.len(), 1);
+        assert_eq!(check(nested.path(), false).unwrap().errors.len(), 1);
         let upper = tree(&["Index.html"]);
-        assert_eq!(check(upper.path()).unwrap().errors.len(), 1);
+        assert_eq!(check(upper.path(), false).unwrap().errors.len(), 1);
     }
 
     #[test]
     fn one_file() {
         let dir = tree(&["notes.pdf", ".env"]);
-        let up = check(&dir.path().join("notes.pdf")).unwrap();
+        let up = check(&dir.path().join("notes.pdf"), false).unwrap();
         assert_eq!(up.kind, Kind::File);
         assert_eq!(up.root, dir.path());
         assert_eq!(up.files, ["notes.pdf"]);
         assert_eq!(up.bytes, 1);
         assert!(up.errors.is_empty());
 
-        let dotfile = check(&dir.path().join(".env")).unwrap();
+        let dotfile = check(&dir.path().join(".env"), false).unwrap();
         assert_eq!(dotfile.errors.len(), 1);
     }
 
@@ -239,24 +248,32 @@ mod tests {
             bytes: 2,
             entries: 4,
         };
-        assert!(check_with(dir.path(), &at_limit).unwrap().errors.is_empty());
+        assert!(
+            check_with(dir.path(), &at_limit, false)
+                .unwrap()
+                .errors
+                .is_empty()
+        );
         let few = Limits {
             bytes: 2,
             entries: 3,
         };
-        assert_eq!(check_with(dir.path(), &few).unwrap().errors.len(), 1);
+        assert_eq!(check_with(dir.path(), &few, false).unwrap().errors.len(), 1);
         let small = Limits {
             bytes: 1,
             entries: 4,
         };
-        assert_eq!(check_with(dir.path(), &small).unwrap().errors.len(), 1);
+        assert_eq!(
+            check_with(dir.path(), &small, false).unwrap().errors.len(),
+            1
+        );
     }
 
     #[test]
     fn warns_about_hash_in_a_name() {
         // Windows does not allow "?" in a file name, so only "#" is tested.
         let dir = tree(&["index.html", "photo#1.png"]);
-        let up = check(dir.path()).unwrap();
+        let up = check(dir.path(), false).unwrap();
         assert_eq!(up.warnings.len(), 1);
         assert!(up.errors.is_empty());
     }
@@ -265,9 +282,30 @@ mod tests {
     fn folder_runs_the_link_checks() {
         let dir = tree(&["index.html"]);
         fs::write(dir.path().join("index.html"), "<img src=\"/a.png\">").unwrap();
-        let up = check(dir.path()).unwrap();
+        let up = check(dir.path(), false).unwrap();
         assert_eq!(up.warnings.len(), 1);
         assert!(up.warnings[0].starts_with("index.html:1: /a.png"));
+    }
+
+    #[test]
+    fn a_secret_stops_the_upload_unless_allowed() {
+        let dir = tree(&["index.html", "app.js"]);
+        // Built at run time, so that no scanner finds a token in this file.
+        let token = format!("ghp_{}", "a".repeat(36));
+        fs::write(
+            dir.path().join("app.js"),
+            format!("\n\nlet t = \"{token}\";"),
+        )
+        .unwrap();
+
+        let up = check(dir.path(), false).unwrap();
+        assert_eq!(up.errors.len(), 1);
+        assert!(up.errors[0].starts_with("app.js:3: "));
+        assert!(!up.errors[0].contains(&token));
+
+        let allowed = check(dir.path(), true).unwrap();
+        assert!(allowed.errors.is_empty());
+        assert_eq!(allowed.warnings.len(), 1);
     }
 
     #[test]
@@ -283,7 +321,7 @@ mod tests {
             eprintln!("skipped: cannot make a symlink on this computer");
             return;
         }
-        let up = check(dir.path()).unwrap();
+        let up = check(dir.path(), false).unwrap();
         assert_eq!(up.files, ["data/a.txt", "index.html"]);
         assert_eq!(up.skipped, ["link"]);
     }
