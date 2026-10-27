@@ -11,9 +11,15 @@ use anyhow::{Context, Result};
 use html5gum::{DefaultEmitter, Token, Tokenizer};
 use regex::Regex;
 
-/// url(...) in CSS: double quotes, single quotes, or none.
-static CSS_URL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]*))\s*\)"#).unwrap()
+/// In CSS: a comment, a string, or url(...) with the link in group 1, 2, or 3
+/// (double quotes, single quotes, or none). Comments and strings match only to
+/// skip them, so url(...) inside them is not a link.
+static CSS: LazyLock<Regex> = LazyLock::new(|| {
+    let esc = r"\\(?:[0-9a-f]{1,6}\s?|.)"; // CSS Syntax 4.3.7
+    Regex::new(&format!(
+        r#"(?is)/\*.*?(?:\*/|$)|"(?:[^"\\\n]|{esc})*"|'(?:[^'\\\n]|{esc})*'|url\(\s*(?:"((?:[^"\\\n]|{esc})*)"|'((?:[^'\\\n]|{esc})*)'|((?:[^)"'\s\\]|{esc})*))\s*\)"#
+    ))
+    .unwrap()
 });
 
 /// A scheme, as in "https:" or "mailto:" (RFC 3986, section 3.1).
@@ -21,7 +27,8 @@ static SCHEME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9+.-]*:").unwrap());
 
 /// Warnings for the links in the .html, .htm, and .css files of an upload.
-pub fn check(root: &Path, files: &[String]) -> Result<Vec<String>> {
+/// one_file: the upload is one file, not a folder.
+pub fn check(root: &Path, files: &[String], one_file: bool) -> Result<Vec<String>> {
     let names: HashSet<&str> = files.iter().map(String::as_str).collect();
     let mut warnings = Vec::new();
     for f in files {
@@ -32,7 +39,7 @@ pub fn check(root: &Path, files: &[String]) -> Result<Vec<String>> {
             _ => continue,
         };
         for (line, link) in links {
-            if let Some(p) = problem(f, &link, &names) {
+            if let Some(p) = problem(f, &link, &names, one_file) {
                 warnings.push(format!("{f}:{line}: {p}"));
             }
         }
@@ -77,16 +84,40 @@ fn html_links(html: &str) -> Vec<(usize, String)> {
 
 /// (line, link) for each url(...). first_line is the line of the first byte.
 fn css_links(css: &str, first_line: usize) -> Vec<(usize, String)> {
-    CSS_URL
-        .captures_iter(css)
+    CSS.captures_iter(css)
         .filter_map(|c| c.get(1).or(c.get(2)).or(c.get(3)))
-        .map(|m| {
-            (
-                first_line + line(css, m.start()) - 1,
-                m.as_str().to_string(),
-            )
-        })
+        .map(|m| (first_line + line(css, m.start()) - 1, unescape(m.as_str())))
         .collect()
+}
+
+/// Decodes CSS escapes: `\ ` and `\20 ` are a space. A `\` before a new line
+/// in a string is removed.
+fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6
+            && let Some(h) = chars.next_if(char::is_ascii_hexdigit)
+        {
+            hex.push(h);
+        }
+        if hex.is_empty() {
+            match chars.next() {
+                Some('\n') | None => {}
+                Some(c) => out.push(c),
+            }
+        } else {
+            chars.next_if(|c| c.is_ascii_whitespace());
+            let code = u32::from_str_radix(&hex, 16).unwrap();
+            out.push(char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+    }
+    out
 }
 
 /// The line (from 1) of a byte offset.
@@ -100,7 +131,7 @@ fn line(text: &str, offset: usize) -> usize {
 }
 
 /// The warning for one link in the file `from`, or None.
-fn problem(from: &str, link: &str, files: &HashSet<&str>) -> Option<String> {
+fn problem(from: &str, link: &str, files: &HashSet<&str>, one_file: bool) -> Option<String> {
     let link = link.trim(); // as the URL parser does
     if link.is_empty() || link.starts_with('#') || link.starts_with("//") || SCHEME.is_match(link) {
         return None;
@@ -114,12 +145,25 @@ fn problem(from: &str, link: &str, files: &HashSet<&str>) -> Option<String> {
     if path.is_empty() {
         return None; // "?page=2" is this page
     }
+    // A one-file Site is at /site, with no "/" at the end, so a relative link
+    // starts from the top of the domain.
+    if one_file {
+        return Some(format!(
+            "{link} goes outside this Site. A Site with one file has no other files."
+        ));
+    }
     let Some(target) = resolve(from, &decode(path)) else {
         return Some(format!("{link} goes above the top of the Site."));
     };
-    // "about" is fine for the folder "about/": the server redirects to "about/".
-    if files.contains(target.as_str()) || files.contains(format!("{target}/index.html").as_str()) {
+    if files.contains(target.as_str()) {
         return None;
+    }
+    // Only the top of the Site redirects /site to /site/. For /site/about the
+    // server finds no file.
+    if files.contains(format!("{target}/index.html").as_str()) {
+        return Some(format!(
+            "{link} goes to a folder. Add \"/\" at the end of the folder name."
+        ));
     }
     // On Windows the browser finds Photo.png for photo.png; the server does not.
     match files.iter().find(|f| f.eq_ignore_ascii_case(&target)) {
@@ -207,6 +251,14 @@ mod tests {
     }
 
     #[test]
+    fn css_links_skips_comments_and_strings_and_reads_escapes() {
+        let css = "/* url(a.png)\n   url(b.png) */\n\
+                   p::before { content: \"url(c.png)\" }\n\
+                   p { background: url(\"d\\ e.png\"), url(\\66 .png) }";
+        assert_eq!(css_links(css, 1), links(&[(4, "d e.png"), (4, "f.png")]));
+    }
+
+    #[test]
     fn problem_finds_root_links_and_missing_files() {
         let files: HashSet<&str> = [
             "index.html",
@@ -216,7 +268,7 @@ mod tests {
             "about/index.html",
         ]
         .into();
-        let p = |link| problem("a/page.html", link, &files);
+        let p = |link| problem("a/page.html", link, &files, false);
 
         for fine in [
             "",
@@ -230,7 +282,6 @@ mod tests {
             "x%20y.png",
             "../index.html",
             "..",
-            "../about",
             "../about/",
         ] {
             assert_eq!(p(fine), None, "{fine:?}");
@@ -239,7 +290,21 @@ mod tests {
         assert!(p("missing.png").is_some());
         assert!(p("./").is_some()); // a/index.html
         assert!(p("../../x.png").is_some());
+        // The server does not redirect /site/about to /site/about/.
+        assert!(p("../about").unwrap().contains("Add \"/\""));
         // The exact name, for a link with the wrong case.
         assert!(p("img/Photo.png").unwrap().contains("a/img/photo.png"));
+    }
+
+    #[test]
+    fn problem_in_a_one_file_site() {
+        // The Site is at /site, so "notes.html" goes to /notes.html.
+        let files: HashSet<&str> = ["notes.html"].into();
+        let p = |link| problem("notes.html", link, &files, true);
+        for fine in ["#top", "?page=2", "https://example.com/"] {
+            assert_eq!(p(fine), None, "{fine:?}");
+        }
+        assert!(p("notes.html").is_some());
+        assert!(p("img/a.png").is_some());
     }
 }

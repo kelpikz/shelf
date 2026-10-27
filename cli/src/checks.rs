@@ -102,7 +102,8 @@ fn check_with(path: &Path, limits: &Limits) -> Result<Upload> {
     }
     // Only within the limits: the checks read the files.
     if up.errors.is_empty() {
-        up.warnings.extend(links::check(&up.root, &up.files)?);
+        up.warnings
+            .extend(links::check(&up.root, &up.files, up.kind == Kind::File)?);
     }
     Ok(up)
 }
