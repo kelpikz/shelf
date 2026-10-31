@@ -35,6 +35,7 @@ pub struct Upload {
     pub kind: Kind,
     pub root: PathBuf,        // the folder; for one file, its parent
     pub files: Vec<String>,   // relative to root, "/"-separated, sorted
+    pub data: Vec<Vec<u8>>,   // the content of each file; empty if a limit fails
     pub bytes: u64,           // all files
     pub skipped: Vec<String>, // sorted; folders end in "/"
     pub warnings: Vec<String>,
@@ -53,6 +54,7 @@ fn check_with(path: &Path, limits: &Limits, allow_secrets: bool) -> Result<Uploa
         kind: Kind::Folder,
         root: path.to_path_buf(),
         files: Vec::new(),
+        data: Vec::new(),
         bytes: 0,
         skipped: Vec::new(),
         warnings: Vec::new(),
@@ -101,11 +103,17 @@ fn check_with(path: &Path, limits: &Limits, allow_secrets: bool) -> Result<Uploa
         up.errors
             .push(format!("More than {} MB of files.", limits.bytes >> 20));
     }
-    // Only within the limits: the checks read the files.
+    // Only within the limits. Each file is read once: the checks and the pack
+    // use the same bytes, so a later change on the disk is not sent unchecked.
     if up.errors.is_empty() {
+        up.data = up
+            .files
+            .iter()
+            .map(|f| fs::read(up.root.join(f)).with_context(|| format!("Cannot read {f}")))
+            .collect::<Result<_>>()?;
         up.warnings
-            .extend(links::check(&up.root, &up.files, up.kind == Kind::File)?);
-        for s in secrets::check(&up.root, &up.files)? {
+            .extend(links::check(&up.files, &up.data, up.kind == Kind::File));
+        for s in secrets::check(&up.files, &up.data) {
             if allow_secrets {
                 up.warnings.push(s);
             } else {

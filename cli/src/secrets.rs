@@ -2,11 +2,8 @@
 //! from the Gitleaks default rules. A match gives the rule, the file, and the
 //! line, never the secret.
 
-use std::fs;
-use std::path::Path;
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result};
 use regex::bytes::Regex;
 
 /// (rule name, pattern). Patterns follow gitleaks.toml (ids in the comments),
@@ -65,16 +62,16 @@ static COMPILED: LazyLock<Vec<(&str, Regex)>> = LazyLock::new(|| {
         .collect()
 });
 
-/// "file:line: ..." for each match in the files.
-pub fn check(root: &Path, files: &[String]) -> Result<Vec<String>> {
+/// "file:line: ..." for each match in the files. data[i] is the content of
+/// files[i].
+pub fn check(files: &[String], data: &[Vec<u8>]) -> Vec<String> {
     let mut found = Vec::new();
-    for f in files {
-        let data = fs::read(root.join(f)).with_context(|| format!("Cannot read {f}"))?;
-        for (line, rule) in find(&data) {
+    for (f, data) in files.iter().zip(data) {
+        for (line, rule) in find(data) {
             found.push(format!("{f}:{line}: this looks like {rule}."));
         }
     }
-    Ok(found)
+    found
 }
 
 /// (line, rule name) for each match, in the order of the rules.

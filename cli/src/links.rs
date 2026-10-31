@@ -3,11 +3,8 @@
 //! breaks. Warnings only: links that JavaScript makes are not seen.
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result};
 use html5gum::{DefaultEmitter, Token, Tokenizer};
 use regex::Regex;
 
@@ -27,15 +24,17 @@ static SCHEME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9+.-]*:").unwrap());
 
 /// Warnings for the links in the .html, .htm, and .css files of an upload.
-/// one_file: the upload is one file, not a folder.
-pub fn check(root: &Path, files: &[String], one_file: bool) -> Result<Vec<String>> {
+/// data[i] is the content of files[i]. one_file: the upload is one file, not a
+/// folder.
+pub fn check(files: &[String], data: &[Vec<u8>], one_file: bool) -> Vec<String> {
     let names: HashSet<&str> = files.iter().map(String::as_str).collect();
     let mut warnings = Vec::new();
-    for f in files {
+    for (f, data) in files.iter().zip(data) {
         let ext = f.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        let text = String::from_utf8_lossy(data);
         let links = match ext.as_deref() {
-            Some("html" | "htm") => html_links(&read(root, f)?),
-            Some("css") => css_links(&read(root, f)?, 1),
+            Some("html" | "htm") => html_links(&text),
+            Some("css") => css_links(&text, 1),
             _ => continue,
         };
         for (line, link) in links {
@@ -44,16 +43,12 @@ pub fn check(root: &Path, files: &[String], one_file: bool) -> Result<Vec<String
             }
         }
     }
-    Ok(warnings)
-}
-
-fn read(root: &Path, name: &str) -> Result<String> {
-    let bytes = fs::read(root.join(name)).with_context(|| format!("Cannot read {name}"))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    warnings
 }
 
 /// (line, link) for each src and href, and each url(...) in a <style> block.
 fn html_links(html: &str) -> Vec<(usize, String)> {
+    let lines = LineNumbers::new(html);
     let mut emitter = DefaultEmitter::<usize>::new_with_span();
     // Reads <script> and <style> content as text, as a browser does, so
     // markup inside them gives no links.
@@ -67,14 +62,14 @@ fn html_links(html: &str) -> Vec<(usize, String)> {
                 for name in [b"src".as_slice(), b"href"] {
                     if let Some(v) = tag.attributes.get(name) {
                         let link = String::from_utf8_lossy(&v.value).into_owned();
-                        links.push((line(html, v.span.start), link));
+                        links.push((lines.at(v.span.start), link));
                     }
                 }
             }
             Token::EndTag(_) => in_style = false,
             Token::String(text) if in_style => {
                 let css = String::from_utf8_lossy(&text.value);
-                links.extend(css_links(&css, line(html, text.span.start)));
+                links.extend(css_links(&css, lines.at(text.span.start)));
             }
             _ => {}
         }
@@ -84,9 +79,10 @@ fn html_links(html: &str) -> Vec<(usize, String)> {
 
 /// (line, link) for each url(...). first_line is the line of the first byte.
 fn css_links(css: &str, first_line: usize) -> Vec<(usize, String)> {
+    let lines = LineNumbers::new(css);
     CSS.captures_iter(css)
         .filter_map(|c| c.get(1).or(c.get(2)).or(c.get(3)))
-        .map(|m| (first_line + line(css, m.start()) - 1, unescape(m.as_str())))
+        .map(|m| (first_line + lines.at(m.start()) - 1, unescape(m.as_str())))
         .collect()
 }
 
@@ -120,14 +116,23 @@ fn unescape(s: &str) -> String {
     out
 }
 
-/// The line (from 1) of a byte offset.
-fn line(text: &str, offset: usize) -> usize {
-    let end = offset.min(text.len());
-    text.as_bytes()[..end]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-        + 1
+/// Indexes line breaks once, so each lookup avoids scanning the file again.
+struct LineNumbers(Vec<usize>);
+
+impl LineNumbers {
+    fn new(text: &str) -> Self {
+        Self(
+            text.bytes()
+                .enumerate()
+                .filter_map(|(i, b)| (b == b'\n').then_some(i))
+                .collect(),
+        )
+    }
+
+    /// The line (from 1) of a byte offset.
+    fn at(&self, offset: usize) -> usize {
+        self.0.partition_point(|&newline| newline < offset) + 1
+    }
 }
 
 /// The warning for one link in the file `from`, or None.
@@ -222,6 +227,42 @@ mod tests {
 
     fn links(pairs: &[(usize, &str)]) -> Vec<(usize, String)> {
         pairs.iter().map(|&(l, s)| (l, s.to_string())).collect()
+    }
+
+    #[test]
+    fn line_numbers_handle_byte_offsets_in_any_order() {
+        let lines = LineNumbers::new("é\r\n二\nlast\n");
+        for (offset, expected) in [
+            (13, 4),
+            (0, 1),
+            (8, 3),
+            (4, 2),
+            (3, 1),
+            (7, 2),
+            (12, 3),
+            (usize::MAX, 4),
+        ] {
+            assert_eq!(lines.at(offset), expected, "offset {offset}");
+        }
+        assert_eq!(LineNumbers::new("").at(0), 1);
+    }
+
+    #[test]
+    fn html_links_keeps_lines_for_reordered_attributes_and_style_blocks() {
+        let html = "é\r\n\
+                    <object\n\
+                      href=\"h.png\"\n\
+                      src=\"s.png\">\n\
+                    </object>\n\
+                    <style>\n\
+                    p { background: url(\n\
+                      'bg.png') }\n\
+                    </style>\n\
+                    <img src=\"last.png\">\n";
+        assert_eq!(
+            html_links(html),
+            links(&[(4, "s.png"), (3, "h.png"), (8, "bg.png"), (10, "last.png")])
+        );
     }
 
     #[test]

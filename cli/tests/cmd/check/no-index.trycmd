@@ -1,0 +1,9 @@
+No index.html at the top. about/index.html and Index.html do not count.
+
+```console
+$ shelf check .
+? failed
+✗ The folder has no index.html at its top.
+error: Fix the errors before the upload.
+
+```

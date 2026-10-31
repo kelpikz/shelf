@@ -1,0 +1,36 @@
+A Site with one file.
+
+```console
+$ shelf check notes.txt
+✓ 1 file, 12 bytes ([..] packed). Ready to upload.
+
+```
+
+A relative link in a one-file Site goes outside the Site.
+
+```console
+$ shelf check page.html
+! page.html:1: other.html goes outside this Site. A Site with one file has no other files.
+✓ 1 file, 31 bytes ([..] packed). Ready to upload.
+
+```
+
+A dotfile is not uploaded, also when it is named.
+
+```console
+$ shelf check .hidden
+? failed
+✗ .hidden is a dotfile. Dotfiles are not uploaded.
+error: Fix the errors before the upload.
+
+```
+
+A path that does not exist. The cause text comes from the OS.
+
+```console
+$ shelf check missing.txt
+? failed
+error: Cannot open missing.txt
+...
+
+```

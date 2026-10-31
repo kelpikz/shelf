@@ -3,6 +3,7 @@ mod client;
 mod keystore;
 mod links;
 mod login;
+mod pack;
 mod secrets;
 mod ui;
 
@@ -228,6 +229,16 @@ fn check(path: &Path, allow_secrets: bool) -> Result<()> {
     if !up.errors.is_empty() {
         bail!("Fix the errors before the upload.");
     }
+    let packed = pack::pack(&up)?;
+    let files = match up.files.len() {
+        1 => "1 file".to_string(),
+        n => format!("{n} files"),
+    };
+    ui::ok(format_args!(
+        "{files}, {} ({} packed). Ready to upload.",
+        size(up.bytes),
+        size(packed.len() as u64)
+    ));
     Ok(())
 }
 
@@ -244,16 +255,6 @@ fn report(up: &checks::Upload) {
     }
     for e in &up.errors {
         ui::bad(e);
-    }
-    if up.errors.is_empty() {
-        let files = match up.files.len() {
-            1 => "1 file".to_string(),
-            n => format!("{n} files"),
-        };
-        ui::ok(format_args!(
-            "{files}, {}. Ready to upload.",
-            size(up.bytes)
-        ));
     }
 }
 
