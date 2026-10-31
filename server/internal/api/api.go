@@ -13,19 +13,24 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kelpikz/shelf/server/internal/auth"
+	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
 const maxBody = 4 << 10 // JSON bodies are small; uploads get their own limit
 
 type API struct {
-	AdminURL string // origin of the admin host, for the approval link
-	CLI      *auth.CLI
+	AdminURL      string // origin of the admin host, for the approval link
+	CLI           *auth.CLI
+	Sites         *sites.Sites
+	FilesURL      string
+	UploadTimeout time.Duration
 }
 
-func New(adminURL string, cli *auth.CLI) *API {
-	return &API{AdminURL: adminURL, CLI: cli}
+func New(adminURL, filesURL string, cli *auth.CLI, s *sites.Sites) *API {
+	return &API{AdminURL: adminURL, CLI: cli, Sites: s, FilesURL: filesURL, UploadTimeout: 120 * time.Second}
 }
 
 func (a *API) Handler() http.Handler {
@@ -35,6 +40,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/cli/logout", a.logout)
 	mux.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
 	mux.HandleFunc("PATCH /api/v1/cli/key", a.updateKey)
+	mux.HandleFunc("GET /api/v1/sites/{path}", a.checkPath)
+	mux.HandleFunc("PUT /api/v1/sites/{path}", a.uploadSite)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API request.")
 	})

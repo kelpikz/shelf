@@ -25,9 +25,11 @@ type Config struct {
 	AdminURL string
 	// FilesURL is the origin of the Sites host, for example
 	// "https://files.ajitha.fyi". It has no path and no trailing slash.
-	FilesURL string
-	DataDir  string
-	Port     string
+	FilesURL            string
+	DataDir             string
+	Port                string
+	UploadMinFreeBytes  uint64
+	SiteStorageMaxBytes int64
 }
 
 // Load reads the config. Values from a local .env file are used only when the
@@ -88,6 +90,14 @@ func Load() (Config, error) {
 	c.OwnerGitHubID, err = strconv.ParseInt(ownerID, 10, 64)
 	if err != nil || c.OwnerGitHubID <= 0 {
 		return Config{}, fmt.Errorf("OWNER_GITHUB_ID must be the number of a GitHub account, got %q", ownerID)
+	}
+	c.UploadMinFreeBytes, err = strconv.ParseUint(envOr("UPLOAD_MIN_FREE_BYTES", "1073741824"), 10, 64)
+	if err != nil {
+		return Config{}, fmt.Errorf("UPLOAD_MIN_FREE_BYTES must be a nonnegative byte count")
+	}
+	c.SiteStorageMaxBytes, err = strconv.ParseInt(envOr("SITE_STORAGE_MAX_BYTES", "0"), 10, 64)
+	if err != nil || c.SiteStorageMaxBytes < 0 {
+		return Config{}, fmt.Errorf("SITE_STORAGE_MAX_BYTES must be a nonnegative byte count")
 	}
 
 	return c, nil

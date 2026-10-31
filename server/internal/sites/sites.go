@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -57,9 +58,13 @@ type Sites struct {
 	Now func() time.Time
 
 	// Limits for one upload.
-	MaxUpload   int64 // bytes of the .tar.gz
-	MaxUnpacked int64 // bytes of all files after unpacking
-	MaxFiles    int
+	MaxUpload    int64 // bytes of the .tar.gz
+	MaxUnpacked  int64 // bytes of all files after unpacking
+	MaxFiles     int
+	MinFreeSpace uint64 // free bytes to leave after staging
+	MaxStorage   int64  // total Site file bytes, including staging; 0 means no quota
+	freeSpace    func(string) (uint64, error)
+	upload       chan struct{}
 
 	mu sync.Mutex // one Publish or Delete at a time
 }
@@ -68,6 +73,7 @@ func New(db *sql.DB, dataDir string) *Sites {
 	return &Sites{
 		db: db, dir: filepath.Join(dataDir, "sites"), Now: time.Now,
 		MaxUpload: 10 << 20, MaxUnpacked: 50 << 20, MaxFiles: 10_000,
+		MinFreeSpace: 1 << 30, freeSpace: diskFree, upload: make(chan struct{}, 1),
 	}
 }
 
@@ -129,12 +135,28 @@ func (s *Sites) Publish(ctx context.Context, path string, kind Kind, tarGz io.Re
 	if kind != File && kind != Folder {
 		return Site{}, badUpload("unknown kind %q", kind)
 	}
+	select {
+	case s.upload <- struct{}{}:
+		defer func() { <-s.upload }()
+	default:
+		return Site{}, ErrUploadBusy
+	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return Site{}, err
 	}
+	if err := s.checkStorage(ctx); err != nil {
+		return Site{}, err
+	}
 	folder := path + "-" + uuid.NewString()
-	file, err := s.unpack(filepath.Join(s.dir, folder), kind, tarGz)
+	file, err := s.unpack(ctx, filepath.Join(s.dir, folder), kind, contextReader{ctx, tarGz})
 	if err != nil {
+		os.RemoveAll(filepath.Join(s.dir, folder))
+		if ctx.Err() != nil {
+			return Site{}, ctx.Err()
+		}
+		return Site{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		os.RemoveAll(filepath.Join(s.dir, folder))
 		return Site{}, err
 	}
@@ -255,7 +277,7 @@ func (s *Sites) removeFolder(folder string) {
 // unpack writes the files of a .tar.gz into dir. It refuses an entry that
 // can write outside dir (a link, "..", or an absolute path), a dotfile, and
 // an upload over the limits. For a one-file Site, it gives the file name.
-func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
+func (s *Sites) unpack(ctx context.Context, dir string, kind Kind, tarGz io.Reader) (string, error) {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -265,26 +287,29 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 	}
 	defer root.Close()
 
-	gz, err := gzip.NewReader(&limitReader{r: tarGz, n: s.MaxUpload, msg: "the upload is too large"})
+	gz, err := gzip.NewReader(&limitReader{r: tarGz, n: s.MaxUpload, msg: "the upload is too large", err: ErrUploadTooLarge})
 	if err != nil {
 		if errors.Is(err, ErrBadUpload) {
 			return "", err
 		}
-		return "", badUpload("not a .tar.gz")
+		return "", fmt.Errorf("%w: not a .tar.gz: %w", ErrBadUpload, err)
 	}
+	defer gz.Close()
 	// A small upload can unpack to a very large stream. Limit all of it: the
 	// files, the tar headers and padding, and the data after the tar end.
 	unpackedStream := &limitReader{
 		r: gz, n: s.MaxUnpacked + int64(s.MaxFiles+1)*tarOverhead,
 		msg: fmt.Sprintf("more than %d MB after unpacking", s.MaxUnpacked>>20),
 	}
-	tr := tar.NewReader(unpackedStream)
+	checkedStream := contextReader{ctx, unpackedStream}
+	tr := tar.NewReader(checkedStream)
 	var names []string
 	var unpacked int64
 	// dirs holds each folder that the upload makes, also the parents that a
 	// file name like "a/b/c.txt" makes. Folders use disk space, so they
 	// count toward MaxFiles.
 	dirs := map[string]bool{}
+	files := map[string]bool{}
 	tooMany := badUpload("more than %d files and folders", s.MaxFiles)
 	addDirs := func(dir string) error {
 		// Each "/" makes one more folder. Check the depth first, so that a
@@ -295,6 +320,9 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 		// The name is clean, so each parent is the part before a "/". When a
 		// folder is in dirs, its parents are in dirs too.
 		for dir != "." && !dirs[dir] {
+			if files[dir] {
+				return badUpload("file and folder conflict at %q", dir)
+			}
 			dirs[dir] = true
 			i := strings.LastIndexByte(dir, '/')
 			if i < 0 {
@@ -308,6 +336,9 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 		return nil
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		h, err := tr.Next()
 		if err == io.EOF {
 			break
@@ -316,12 +347,17 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 			if errors.Is(err, ErrBadUpload) {
 				return "", err
 			}
-			return "", badUpload("broken .tar.gz: %v", err)
+			return "", fmt.Errorf("%w: broken .tar.gz: %w", ErrBadUpload, err)
 		}
 
 		name := strings.TrimSuffix(h.Name, "/")
 		if err := checkName(name); err != nil {
 			return "", err
+		}
+		for key := range h.PAXRecords {
+			if strings.HasPrefix(key, "GNU.sparse.") || key == "SCHILY.realsize" {
+				return "", badUpload("sparse files are not allowed")
+			}
 		}
 		switch h.Typeflag {
 		case tar.TypeDir:
@@ -336,6 +372,10 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 			}
 			continue
 		case tar.TypeReg:
+			if files[name] || dirs[name] {
+				return "", badUpload("duplicate file or folder conflict at %q", name)
+			}
+			files[name] = true
 		default:
 			return "", badUpload("%q is not a plain file or folder", h.Name)
 		}
@@ -354,17 +394,17 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 			if errors.Is(err, ErrBadUpload) {
 				return "", err
 			}
-			return "", badUpload("cannot write %q: %v", name, err)
+			return "", fmt.Errorf("cannot write %q: %w", name, err)
 		}
 	}
 
 	// The tar end is not the stream end. Read the rest, so that the gzip
 	// checksum is checked and data after the end counts toward the limits.
-	if _, err := io.Copy(io.Discard, unpackedStream); err != nil {
+	if _, err := io.Copy(io.Discard, checkedStream); err != nil {
 		if errors.Is(err, ErrBadUpload) {
 			return "", err
 		}
-		return "", badUpload("broken .tar.gz: %v", err)
+		return "", fmt.Errorf("%w: broken .tar.gz: %w", ErrBadUpload, err)
 	}
 
 	switch {
@@ -381,12 +421,17 @@ func (s *Sites) unpack(dir string, kind Kind, tarGz io.Reader) (string, error) {
 // checkName refuses names that can leave the folder of the Site, and
 // dotfiles like .env and .git, which must never go online.
 func checkName(name string) error {
-	if !fs.ValidPath(name) || name == "." || strings.Contains(name, `\`) || !filepath.IsLocal(filepath.FromSlash(name)) {
+	if len(name) > 1024 || strings.Count(name, "/") >= 16 || !fs.ValidPath(name) || name == "." || strings.ContainsAny(name, "\\:") || !filepath.IsLocal(filepath.FromSlash(name)) {
 		return badUpload("bad file name %q", name)
 	}
+	for _, c := range name {
+		if unicode.IsControl(c) {
+			return badUpload("control character in file name %q", name)
+		}
+	}
 	for _, part := range strings.Split(name, "/") {
-		if strings.HasPrefix(part, ".") {
-			return badUpload("dotfiles are not allowed: %q", name)
+		if len(part) > 255 || strings.HasPrefix(part, ".") || part == "node_modules" {
+			return badUpload("file name is not allowed: %q", name)
 		}
 	}
 	return nil
@@ -397,11 +442,11 @@ func writeFile(root *os.Root, name string, r io.Reader) error {
 	if err := root.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	f, err := root.Create(p)
+	f, err := root.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, r)
+	_, err = io.Copy(f, archiveReader{r})
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
