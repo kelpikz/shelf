@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
+use crate::links;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     File,
@@ -97,6 +99,11 @@ fn check_with(path: &Path, limits: &Limits) -> Result<Upload> {
     if up.bytes > limits.bytes {
         up.errors
             .push(format!("More than {} MB of files.", limits.bytes >> 20));
+    }
+    // Only within the limits: the checks read the files.
+    if up.errors.is_empty() {
+        up.warnings
+            .extend(links::check(&up.root, &up.files, up.kind == Kind::File)?);
     }
     Ok(up)
 }
@@ -252,6 +259,15 @@ mod tests {
         let up = check(dir.path()).unwrap();
         assert_eq!(up.warnings.len(), 1);
         assert!(up.errors.is_empty());
+    }
+
+    #[test]
+    fn folder_runs_the_link_checks() {
+        let dir = tree(&["index.html"]);
+        fs::write(dir.path().join("index.html"), "<img src=\"/a.png\">").unwrap();
+        let up = check(dir.path()).unwrap();
+        assert_eq!(up.warnings.len(), 1);
+        assert!(up.warnings[0].starts_with("index.html:1: /a.png"));
     }
 
     #[test]
