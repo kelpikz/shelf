@@ -1,0 +1,12 @@
+Bad links are warnings, not errors. Links to other domains and to "#top" are good.
+
+```console
+$ shelf check .
+! index.html:1: about goes to a folder. Add "/" at the end of the folder name.
+! index.html:2: /img/logo.png starts with "/". It goes to the top of the domain, not to this Site.
+! index.html:3: img/Photo.png is not in the upload. The file is img/photo.png: the case is different.
+! index.html:4: img/missing.png is not in the upload.
+! index.html:5: ../up.html goes above the top of the Site.
+✓ 4 files, 212 bytes ([..] packed). Ready to upload.
+
+```

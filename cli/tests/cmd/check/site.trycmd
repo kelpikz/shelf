@@ -1,0 +1,11 @@
+A good Site. Dotfiles and node_modules are skipped. The links are good.
+
+```console
+$ shelf check .
+Not uploaded (dotfiles, node_modules, __MACOSX, and links):
+  .cache/
+  img/.DS_Store
+  node_modules/
+✓ 3 files, 126 bytes ([..] packed). Ready to upload.
+
+```
