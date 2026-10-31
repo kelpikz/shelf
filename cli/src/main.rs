@@ -3,6 +3,7 @@ mod client;
 mod keystore;
 mod links;
 mod login;
+mod secrets;
 mod ui;
 
 use std::env;
@@ -46,6 +47,9 @@ enum Command {
     Check {
         /// The file or the folder to upload
         path: PathBuf,
+        /// Show found secrets as warnings, not errors
+        #[arg(long)]
+        allow_secrets: bool,
     },
 }
 
@@ -56,7 +60,10 @@ fn main() -> ExitCode {
         Command::Logout => logout(&server),
         Command::Status => status(&server),
         Command::Set { name } => set_name(&server, &name),
-        Command::Check { path } => check(&path),
+        Command::Check {
+            path,
+            allow_secrets,
+        } => check(&path, allow_secrets),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -215,8 +222,8 @@ fn set_name(server: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn check(path: &Path) -> Result<()> {
-    let up = checks::check(path)?;
+fn check(path: &Path, allow_secrets: bool) -> Result<()> {
+    let up = checks::check(path, allow_secrets)?;
     report(&up);
     if !up.errors.is_empty() {
         bail!("Fix the errors before the upload.");
