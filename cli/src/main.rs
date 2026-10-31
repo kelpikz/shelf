@@ -1,9 +1,11 @@
+mod checks;
 mod client;
 mod keystore;
 mod login;
 mod ui;
 
 use std::env;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -39,6 +41,11 @@ enum Command {
         #[arg(long)]
         name: String,
     },
+    /// Run the Upload checks on a file or a folder. Sends nothing.
+    Check {
+        /// The file or the folder to upload
+        path: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -48,6 +55,7 @@ fn main() -> ExitCode {
         Command::Logout => logout(&server),
         Command::Status => status(&server),
         Command::Set { name } => set_name(&server, &name),
+        Command::Check { path } => check(&path),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -204,6 +212,54 @@ fn set_name(server: &str, name: &str) -> Result<()> {
         info.device_name
     ));
     Ok(())
+}
+
+fn check(path: &Path) -> Result<()> {
+    let up = checks::check(path)?;
+    report(&up);
+    if !up.errors.is_empty() {
+        bail!("Fix the errors before the upload.");
+    }
+    Ok(())
+}
+
+/// Prints the result of the Upload checks.
+fn report(up: &checks::Upload) {
+    if !up.skipped.is_empty() {
+        ui::dim("Not uploaded (dotfiles, node_modules, __MACOSX, and links):");
+        for name in &up.skipped {
+            ui::detail(name);
+        }
+    }
+    for w in &up.warnings {
+        ui::warn(w);
+    }
+    for e in &up.errors {
+        ui::bad(e);
+    }
+    if up.errors.is_empty() {
+        let files = match up.files.len() {
+            1 => "1 file".to_string(),
+            n => format!("{n} files"),
+        };
+        ui::ok(format_args!(
+            "{files}, {}. Ready to upload.",
+            size(up.bytes)
+        ));
+    }
+}
+
+/// "512 bytes", "12 KB", "3.4 MB".
+fn size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    if bytes < KB {
+        format!("{bytes} bytes")
+    } else if bytes < MB {
+        format!("{} KB", bytes.div_ceil(KB))
+    } else {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    }
 }
 
 /// SHELF_KEY, or the saved key.
