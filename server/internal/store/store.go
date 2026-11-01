@@ -34,6 +34,18 @@ CREATE TABLE IF NOT EXISTS sites (
 	updated_at  INTEGER NOT NULL           -- the last upload
 );
 
+CREATE TABLE IF NOT EXISTS view_codes (
+ id_hash TEXT PRIMARY KEY,
+ browser_hash TEXT NOT NULL,
+ session_hash TEXT NOT NULL REFERENCES sessions(id_hash) ON DELETE CASCADE,
+ expires_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS view_sessions (
+ id_hash TEXT PRIMARY KEY,
+ session_hash TEXT NOT NULL REFERENCES sessions(id_hash) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS cli_logins (
 	device_hash TEXT PRIMARY KEY,          -- hash of the secret device code
 	user_code   TEXT NOT NULL UNIQUE,      -- the short code, without the dash

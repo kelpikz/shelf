@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
+	"github.com/kelpikz/shelf/server/internal/auth"
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
@@ -20,6 +22,8 @@ var files embed.FS
 type Serving struct {
 	Sites    *sites.Sites
 	AdminURL string // for the "Owner? Log in" link
+	FilesURL string
+	Sessions *auth.Sessions
 
 	pages  map[string]*template.Template
 	static http.Handler
@@ -37,6 +41,14 @@ func New(s *sites.Sites, adminURL string) *Serving {
 
 func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Path == "/_shelf/login" {
+		s.viewLogin(w, r)
+		return
+	}
+	if r.URL.Path == "/_shelf/view" {
+		s.finishView(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -75,9 +87,23 @@ func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool)
 		s.serverError(w, err)
 		return false
 	}
-	if !ok || site.Archived || site.Visibility != sites.Public {
+	if !ok || site.Archived {
 		s.notFound(w, r)
 		return false
+	}
+	if site.Visibility == sites.Private {
+		allowed, err := s.ownerView(r)
+		if err != nil {
+			s.serverError(w, err)
+			return false
+		}
+		if !allowed {
+			s.notFound(w, r)
+			return false
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("Referrer-Policy", "same-origin")
 	}
 
 	name := site.File
@@ -140,7 +166,7 @@ func (s *Serving) index(w http.ResponseWriter, r *http.Request) {
 			public = append(public, site)
 		}
 	}
-	s.render(w, http.StatusOK, "index.html", map[string]any{"Sites": public})
+	s.render(w, r, http.StatusOK, "index.html", map[string]any{"Sites": public})
 }
 
 // redirect is a 302 with no-store. Chrome keeps a 301 for ever.
@@ -154,14 +180,15 @@ func redirect(w http.ResponseWriter, r *http.Request, to string) {
 
 // notFound is the one page for a missing, archived, or Private Site.
 func (s *Serving) notFound(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusNotFound, "notfound.html", nil)
+	s.render(w, r, http.StatusNotFound, "notfound.html", nil)
 }
 
-func (s *Serving) render(w http.ResponseWriter, status int, page string, data map[string]any) {
+func (s *Serving) render(w http.ResponseWriter, r *http.Request, status int, page string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
 	}
 	data["AdminURL"] = s.AdminURL
+	data["ViewLoginURL"] = "/_shelf/login?" + url.Values{"return": {r.URL.RequestURI()}}.Encode()
 	var buf bytes.Buffer
 	if err := s.pages[page].ExecuteTemplate(&buf, "base", data); err != nil {
 		s.serverError(w, err)

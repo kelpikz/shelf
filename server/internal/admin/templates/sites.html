@@ -84,7 +84,7 @@
 {{define "site"}}{{$csrf := .CSRF}}{{with .Site}}
 <div class="site">
   <div class="site-info">
-    <a class="site-path" href="{{$.FilesURL}}{{.URL}}">/{{.Path}}</a>
+    <a class="site-path" href="{{$.FilesURL}}{{if eq .Visibility "private"}}/_shelf/login?return={{.URL}}{{else}}{{.URL}}{{end}}">/{{.Path}}</a>
     <span class="badge {{if eq .Visibility "public"}}badge-public{{end}}">{{if eq .Visibility "public"}}Public{{else}}Private{{end}}</span>
     <span class="muted small">{{if eq .Kind "file"}}{{.File}} · {{end}}{{.UpdatedAt.UTC.Format "2 Jan 2006, 15:04"}} UTC</span>
   </div>

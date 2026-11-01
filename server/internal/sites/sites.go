@@ -188,12 +188,14 @@ func (s *Sites) Publish(ctx context.Context, path string, kind Kind, tarGz io.Re
 
 // SetVisibility makes the Site at path Public or Private.
 func (s *Sites) SetVisibility(ctx context.Context, path string, v Visibility) error {
-	return s.update(ctx, `UPDATE sites SET visibility = ? WHERE path = ?`, v, path)
+	_, err := s.Change(ctx, path, Changes{Visibility: &v})
+	return err
 }
 
 // SetArchived takes the Site at path offline for everyone, or puts it back.
 func (s *Sites) SetArchived(ctx context.Context, path string, archived bool) error {
-	return s.update(ctx, `UPDATE sites SET archived = ? WHERE path = ?`, archived, path)
+	_, err := s.Change(ctx, path, Changes{Archived: &archived})
+	return err
 }
 
 // Delete removes the Site at path and its files for ever. The path is then
@@ -213,17 +215,6 @@ func (s *Sites) Delete(ctx context.Context, path string) error {
 		return err
 	}
 	s.removeFolder(site.folder)
-	return nil
-}
-
-func (s *Sites) update(ctx context.Context, query string, args ...any) error {
-	res, err := s.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
 	return nil
 }
 

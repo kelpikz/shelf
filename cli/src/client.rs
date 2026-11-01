@@ -79,11 +79,27 @@ impl SiteKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
     Private,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SiteChange {
+    Visibility(Visibility),
+    Archived(bool),
+}
+
+impl SiteChange {
+    fn matches(self, site: &Site) -> bool {
+        match self {
+            Self::Visibility(value) => site.visibility == value,
+            Self::Archived(value) => site.archived == value,
+        }
+    }
 }
 
 impl Visibility {
@@ -108,6 +124,7 @@ pub struct Site {
 
 impl Site {
     fn validate(&self, path: &str) -> Result<()> {
+        validate_path(path)?;
         let url = Url::parse(&self.url).context("The Site URL is not valid.")?;
         let expected = match self.kind {
             SiteKind::File => format!("/{path}"),
@@ -206,6 +223,7 @@ impl Client {
     }
 
     fn site_url(&self, path: &str) -> Result<Url> {
+        validate_path(path)?;
         let mut url = Url::parse(&format!("{}/api/v1/sites/", self.base))?;
         url.path_segments_mut()
             .map_err(|_| anyhow::anyhow!("The server URL is not valid."))?
@@ -233,6 +251,43 @@ impl Client {
         Ok(check.site)
     }
 
+    pub fn list_sites(&self, key: &str, all: bool) -> Result<Vec<Site>> {
+        let path = if all { "/sites?all=true" } else { "/sites" };
+        let sites: Vec<Site> = self.send(Method::GET, path, Some(key), None)?.json()?;
+        for site in &sites {
+            site.validate(&site.path)?;
+        }
+        Ok(sites)
+    }
+
+    pub fn change_site(&self, key: &str, path: &str, change: SiteChange) -> Result<Site> {
+        let response = self
+            .http
+            .patch(self.site_url(path)?)
+            .bearer_auth(key)
+            .json(&change)
+            .send()
+            .context(UNKNOWN_CHANGE)?;
+        let response = checked_write_response(response, 200, UNKNOWN_CHANGE)?;
+        let site: Site = response.json().context(UNKNOWN_CHANGE)?;
+        site.validate(path).context(UNKNOWN_CHANGE)?;
+        if !change.matches(&site) {
+            bail!(UNKNOWN_CHANGE);
+        }
+        Ok(site)
+    }
+
+    pub fn delete_site(&self, key: &str, path: &str) -> Result<()> {
+        let response = self
+            .http
+            .delete(self.site_url(path)?)
+            .bearer_auth(key)
+            .send()
+            .context(UNKNOWN_CHANGE)?;
+        checked_write_response(response, 204, UNKNOWN_CHANGE)?;
+        Ok(())
+    }
+
     pub fn upload(&self, key: &str, path: &str, kind: SiteKind, archive: Vec<u8>) -> Result<Site> {
         let mut url = self.site_url(path)?;
         url.query_pairs_mut().append_pair("kind", kind.as_str());
@@ -245,21 +300,7 @@ impl Client {
             .body(archive)
             .send()
             .context(UNKNOWN_UPLOAD)?;
-        if resp.status().is_success() && resp.status().as_u16() != 200 {
-            bail!(UNKNOWN_UPLOAD);
-        }
-        let resp = checked_response(resp).map_err(|err| {
-            let refused = err.downcast_ref::<ApiError>().is_some_and(|e| {
-                (400..500).contains(&e.status) && e.status != 408
-                    || (e.status == 503 && e.code == "upload_busy")
-                    || (e.status == 507 && e.code == "storage_full")
-            });
-            if refused {
-                err
-            } else {
-                err.context(UNKNOWN_UPLOAD)
-            }
-        })?;
+        let resp = checked_write_response(resp, 200, UNKNOWN_UPLOAD)?;
         let site: Site = resp.json().context(UNKNOWN_UPLOAD)?;
         site.validate(path).context(UNKNOWN_UPLOAD)?;
         if site.kind != kind {
@@ -292,6 +333,41 @@ impl Client {
 }
 
 const UNKNOWN_UPLOAD: &str = "The upload result is unknown. The Site may already have changed. Check it before trying again. The upload was not repeated.";
+const UNKNOWN_CHANGE: &str = "The result is unknown. The Site may already have changed. Check it before trying again. The request was not repeated.";
+
+fn checked_write_response(
+    resp: Response,
+    expected: u16,
+    unknown: &'static str,
+) -> Result<Response> {
+    let resp = checked_response(resp).map_err(|err| {
+        let refused = err.downcast_ref::<ApiError>().is_some_and(|e| {
+            (400..500).contains(&e.status) && e.status != 408
+                || (e.status == 503 && e.code == "upload_busy")
+                || (e.status == 507 && e.code == "storage_full")
+        });
+        if refused { err } else { err.context(unknown) }
+    })?;
+    if resp.status().as_u16() != expected {
+        bail!(unknown);
+    }
+    Ok(resp)
+}
+
+fn validate_path(path: &str) -> Result<()> {
+    if path.is_empty()
+        || path.len() > 64
+        || path.starts_with('-')
+        || !path
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+    {
+        bail!(
+            "A Site path has 1 to 64 lower case letters, digits, and '-', and does not start with '-'."
+        );
+    }
+    Ok(())
+}
 
 fn checked_response(resp: Response) -> Result<Response> {
     let status = resp.status();

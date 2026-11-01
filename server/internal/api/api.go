@@ -41,6 +41,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
 	mux.HandleFunc("PATCH /api/v1/cli/key", a.updateKey)
 	mux.HandleFunc("GET /api/v1/sites/{path}", a.checkPath)
+	mux.HandleFunc("GET /api/v1/sites", a.listSites)
+	mux.HandleFunc("PATCH /api/v1/sites/{path}", a.updateSite)
+	mux.HandleFunc("DELETE /api/v1/sites/{path}", a.deleteSite)
 	mux.HandleFunc("PUT /api/v1/sites/{path}", a.uploadSite)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "No such API request.")

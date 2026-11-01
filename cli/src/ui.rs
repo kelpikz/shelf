@@ -10,9 +10,9 @@ const fn fg(color: AnsiColor) -> Style {
     Style::new().fg_color(Some(Color::Ansi(color)))
 }
 
-const GOOD: Style = fg(AnsiColor::Green).bold();
+pub const GOOD: Style = fg(AnsiColor::Green).bold();
 const BAD: Style = fg(AnsiColor::Red).bold();
-const WARN: Style = fg(AnsiColor::Yellow).bold();
+pub const WARN: Style = fg(AnsiColor::Yellow).bold();
 const DIM: Style = fg(AnsiColor::BrightBlack);
 const CMD: Style = fg(AnsiColor::Cyan);
 pub const LINK: Style = fg(AnsiColor::Cyan).underline();
