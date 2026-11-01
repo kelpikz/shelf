@@ -6,6 +6,7 @@ mod login;
 mod pack;
 mod secrets;
 mod ui;
+mod upload;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,19 @@ enum Command {
         #[arg(long)]
         allow_secrets: bool,
     },
+    /// Upload a file or a folder to a Site
+    Upload {
+        /// The local file or folder
+        source: PathBuf,
+        /// The Site path, for example notes
+        path: String,
+        /// Accept warning and replacement prompts
+        #[arg(long)]
+        yes: bool,
+        /// Show found secrets as warnings, not errors
+        #[arg(long)]
+        allow_secrets: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -65,6 +79,12 @@ fn main() -> ExitCode {
             path,
             allow_secrets,
         } => check(&path, allow_secrets),
+        Command::Upload {
+            source,
+            path,
+            yes,
+            allow_secrets,
+        } => upload::run(&server, &source, &path, yes, allow_secrets),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

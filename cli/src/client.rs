@@ -4,9 +4,9 @@
 use std::fmt;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use reqwest::Method;
+use anyhow::{Context, Result, bail};
 use reqwest::blocking::Response;
+use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -58,7 +58,83 @@ struct ErrorBody {
 pub struct ApiError {
     #[serde(skip)] // from the HTTP status line, not the body
     pub status: u16,
+    #[serde(default)]
+    pub code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SiteKind {
+    File,
+    Folder,
+}
+
+impl SiteKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Folder => "folder",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,
+    Private,
+}
+
+impl Visibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Private => "private",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Site {
+    pub path: String,
+    pub kind: SiteKind,
+    pub file: String,
+    pub visibility: Visibility,
+    pub archived: bool,
+    pub updated_at: i64,
+    pub url: String,
+}
+
+impl Site {
+    fn validate(&self, path: &str) -> Result<()> {
+        let url = Url::parse(&self.url).context("The Site URL is not valid.")?;
+        let expected = match self.kind {
+            SiteKind::File => format!("/{path}"),
+            SiteKind::Folder => format!("/{path}/"),
+        };
+        if self.path != path
+            || self.updated_at < 0
+            || url.path() != expected
+            || !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || (self.kind == SiteKind::File && (self.file.is_empty() || self.file.contains('/')))
+            || (self.kind == SiteKind::Folder && !self.file.is_empty())
+        {
+            bail!("The server returned an unexpected Site.");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct PathCheck {
+    taken: bool,
+    site: Option<Site>,
 }
 
 impl fmt::Display for ApiError {
@@ -74,6 +150,8 @@ impl Client {
         let http = reqwest::blocking::Client::builder()
             .user_agent(concat!("shelf-cli/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .build()?;
         Ok(Self {
             base: base.to_string(),
@@ -127,6 +205,69 @@ impl Client {
             .json()?)
     }
 
+    fn site_url(&self, path: &str) -> Result<Url> {
+        let mut url = Url::parse(&format!("{}/api/v1/sites/", self.base))?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow::anyhow!("The server URL is not valid."))?
+            .pop_if_empty()
+            .push(path);
+        Ok(url)
+    }
+
+    pub fn check_path(&self, key: &str, path: &str) -> Result<Option<Site>> {
+        let resp = self
+            .http
+            .get(self.site_url(path)?)
+            .bearer_auth(key)
+            .send()
+            .context("Could not check the Site path.")?;
+        let check: PathCheck = checked_response(resp)?
+            .json()
+            .context("The path-check response is not valid.")?;
+        if check.taken != check.site.is_some() {
+            bail!("The path-check response is not valid.");
+        }
+        if let Some(site) = &check.site {
+            site.validate(path)?;
+        }
+        Ok(check.site)
+    }
+
+    pub fn upload(&self, key: &str, path: &str, kind: SiteKind, archive: Vec<u8>) -> Result<Site> {
+        let mut url = self.site_url(path)?;
+        url.query_pairs_mut().append_pair("kind", kind.as_str());
+        let resp = self
+            .http
+            .put(url)
+            .bearer_auth(key)
+            .header("Content-Type", "application/gzip")
+            .timeout(Duration::from_secs(180))
+            .body(archive)
+            .send()
+            .context(UNKNOWN_UPLOAD)?;
+        if resp.status().is_success() && resp.status().as_u16() != 200 {
+            bail!(UNKNOWN_UPLOAD);
+        }
+        let resp = checked_response(resp).map_err(|err| {
+            let refused = err.downcast_ref::<ApiError>().is_some_and(|e| {
+                (400..500).contains(&e.status) && e.status != 408
+                    || (e.status == 503 && e.code == "upload_busy")
+                    || (e.status == 507 && e.code == "storage_full")
+            });
+            if refused {
+                err
+            } else {
+                err.context(UNKNOWN_UPLOAD)
+            }
+        })?;
+        let site: Site = resp.json().context(UNKNOWN_UPLOAD)?;
+        site.validate(path).context(UNKNOWN_UPLOAD)?;
+        if site.kind != kind {
+            bail!(UNKNOWN_UPLOAD);
+        }
+        Ok(site)
+    }
+
     fn send(
         &self,
         method: Method,
@@ -146,20 +287,27 @@ impl Client {
         let resp = req
             .send()
             .with_context(|| format!("Could not reach {}", self.base))?;
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        let mut err = resp
-            .json::<ErrorBody>()
-            .map(|b| b.error)
-            .unwrap_or_else(|_| ApiError {
-                status: 0,
-                message: format!("The server answered with HTTP {}.", status.as_u16()),
-            });
-        err.status = status.as_u16();
-        Err(err.into())
+        checked_response(resp)
     }
+}
+
+const UNKNOWN_UPLOAD: &str = "The upload result is unknown. The Site may already have changed. Check it before trying again. The upload was not repeated.";
+
+fn checked_response(resp: Response) -> Result<Response> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let mut err = resp
+        .json::<ErrorBody>()
+        .map(|b| b.error)
+        .unwrap_or_else(|_| ApiError {
+            status: 0,
+            code: String::new(),
+            message: format!("The server answered with HTTP {}.", status.as_u16()),
+        });
+    err.status = status.as_u16();
+    Err(err.into())
 }
 
 /// True if the server refused the key: it was cancelled, or it ended.
