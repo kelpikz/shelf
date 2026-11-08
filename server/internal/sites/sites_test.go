@@ -32,6 +32,7 @@ type entry struct {
 	body string
 	typ  byte // tar.TypeReg if 0
 	link string
+	pax  map[string]string
 }
 
 func tarGz(t *testing.T, entries ...entry) *bytes.Buffer {
@@ -40,7 +41,7 @@ func tarGz(t *testing.T, entries ...entry) *bytes.Buffer {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for _, e := range entries {
-		h := &tar.Header{Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Typeflag: e.typ, Linkname: e.link}
+		h := &tar.Header{Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Typeflag: e.typ, Linkname: e.link, PAXRecords: e.pax}
 		if e.typ == 0 {
 			h.Typeflag = tar.TypeReg
 		}
@@ -259,7 +260,7 @@ func TestPublishRefusesHugeFileSize(t *testing.T) {
 	gz.Close()
 
 	dir := filepath.Join(t.TempDir(), "site")
-	if _, err := s.unpack(dir, Folder, &buf); !errors.Is(err, ErrBadUpload) {
+	if _, err := s.unpack(context.Background(), dir, Folder, &buf); !errors.Is(err, ErrBadUpload) {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "big.bin")); err == nil {

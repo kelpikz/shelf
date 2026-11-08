@@ -26,7 +26,7 @@ func main() {
 	}
 	defer db.Close()
 
-	allSites, err := prepareSites(context.Background(), db, cfg.DataDir)
+	allSites, err := prepareSites(context.Background(), db, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,8 +46,10 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func prepareSites(ctx context.Context, db *sql.DB, dataDir string) (*sites.Sites, error) {
-	allSites := sites.New(db, dataDir)
+func prepareSites(ctx context.Context, db *sql.DB, cfg config.Config) (*sites.Sites, error) {
+	allSites := sites.New(db, cfg.DataDir)
+	allSites.MinFreeSpace = cfg.UploadMinFreeBytes
+	allSites.MaxStorage = cfg.SiteStorageMaxBytes
 	// Cleanup must finish before uploads can start.
 	if err := allSites.Cleanup(ctx); err != nil {
 		return nil, err

@@ -19,7 +19,7 @@ import (
 func New(cfg config.Config, p auth.Provider, sessions *auth.Sessions, cli *auth.CLI, s *sites.Sites) http.Handler {
 	adminHost, filesHost := host(cfg.AdminURL), host(cfg.FilesURL)
 	adminApp := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, cfg.FilesURL, p, sessions, cli, s).Handler()
-	cliAPI := api.New(cfg.AdminURL, cli).Handler()
+	cliAPI := api.New(cfg.AdminURL, cfg.FilesURL, cli, s).Handler()
 	files := serving.New(s, cfg.AdminURL)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
