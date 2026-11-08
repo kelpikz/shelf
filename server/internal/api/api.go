@@ -5,6 +5,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,20 +35,24 @@ func New(adminURL, filesURL string, cli *auth.CLI, s *sites.Sites) *API {
 }
 
 func (a *API) Handler() http.Handler {
+	// Routes on protected need a valid key.
+	protected := http.NewServeMux()
+	protected.HandleFunc("POST /api/v1/cli/logout", a.logout)
+	protected.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
+	protected.HandleFunc("PATCH /api/v1/cli/key", a.updateKey)
+	protected.HandleFunc("GET /api/v1/sites/{path}", a.checkPath)
+	protected.HandleFunc("GET /api/v1/sites", a.listSites)
+	protected.HandleFunc("PATCH /api/v1/sites/{path}", a.updateSite)
+	protected.HandleFunc("DELETE /api/v1/sites/{path}", a.deleteSite)
+	protected.HandleFunc("PUT /api/v1/sites/{path}", a.uploadSite)
+	protected.HandleFunc("/", notFound)
+
+	// Open routes: the CLI has no key yet. More specific patterns win over /api/v1/.
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/cli/login", a.startLogin)
 	mux.HandleFunc("POST /api/v1/cli/login/poll", a.poll)
-	mux.HandleFunc("POST /api/v1/cli/logout", a.logout)
-	mux.HandleFunc("GET /api/v1/cli/key", a.keyInfo)
-	mux.HandleFunc("PATCH /api/v1/cli/key", a.updateKey)
-	mux.HandleFunc("GET /api/v1/sites/{path}", a.checkPath)
-	mux.HandleFunc("GET /api/v1/sites", a.listSites)
-	mux.HandleFunc("PATCH /api/v1/sites/{path}", a.updateSite)
-	mux.HandleFunc("DELETE /api/v1/sites/{path}", a.deleteSite)
-	mux.HandleFunc("PUT /api/v1/sites/{path}", a.uploadSite)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "No such API request.")
-	})
+	mux.Handle("/api/v1/", a.requireKey(protected))
+	mux.HandleFunc("/", notFound)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -102,11 +107,7 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) logout(w http.ResponseWriter, r *http.Request) {
-	key, ok := a.key(w, r)
-	if !ok {
-		return
-	}
-	if err := a.CLI.Revoke(r.Context(), key.ID); err != nil {
+	if err := a.CLI.Revoke(r.Context(), keyFrom(r.Context()).ID); err != nil {
 		serverError(w, err)
 		return
 	}
@@ -116,25 +117,17 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 // keyInfo describes the key that sends the request. A cancelled or ended key
 // gets 401.
 func (a *API) keyInfo(w http.ResponseWriter, r *http.Request) {
-	key, ok := a.key(w, r)
-	if !ok {
-		return
-	}
-	writeKey(w, key)
+	writeKey(w, keyFrom(r.Context()))
 }
 
 // updateKey changes the key that sends the request. Only the KeyChanges
 // fields are allowed in the body.
 func (a *API) updateKey(w http.ResponseWriter, r *http.Request) {
-	key, ok := a.key(w, r)
-	if !ok {
-		return
-	}
 	var ch auth.KeyChanges
 	if !readJSON(w, r, &ch) {
 		return
 	}
-	key, ok, err := a.CLI.UpdateKey(r.Context(), key.ID, ch)
+	key, ok, err := a.CLI.UpdateKey(r.Context(), keyFrom(r.Context()).ID, ch)
 	if errors.Is(err, auth.ErrBadName) {
 		writeError(w, http.StatusBadRequest, "bad_name", auth.BadNameMessage)
 		return
@@ -152,6 +145,30 @@ func (a *API) updateKey(w http.ResponseWriter, r *http.Request) {
 
 func writeKey(w http.ResponseWriter, key auth.Key) {
 	writeJSON(w, http.StatusOK, map[string]any{"device_name": key.DeviceName, "expires_at": key.ExpiresAt.Unix()})
+}
+
+type keyCtx struct{}
+
+// requireKey runs next only for a valid Bearer key and puts the key in the
+// request context. Otherwise key writes the error.
+func (a *API) requireKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, ok := a.key(w, r)
+		if !ok {
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyCtx{}, key)))
+	})
+}
+
+// keyFrom returns the key that requireKey checked. Outside requireKey it is empty.
+func keyFrom(ctx context.Context) auth.Key {
+	key, _ := ctx.Value(keyCtx{}).(auth.Key)
+	return key
+}
+
+func notFound(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusNotFound, "not_found", "No such API request.")
 }
 
 // key checks the Bearer key. If the check fails, it writes the response and

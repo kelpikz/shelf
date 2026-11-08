@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-
-	"github.com/google/uuid"
 )
 
 type Kind string
@@ -53,7 +51,8 @@ type Site struct {
 // Sites keeps each Site's files in its own folder in dir. An upload goes into
 // a new folder, and one database change switches the Site to it.
 type Sites struct {
-	db  *sql.DB
+	db *sql.DB
+	// The directory to which the sites are uploaded
 	dir string
 	Now func() time.Time
 
@@ -64,7 +63,9 @@ type Sites struct {
 	MinFreeSpace uint64 // free bytes to leave after staging
 	MaxStorage   int64  // total Site file bytes, including staging; 0 means no quota
 	freeSpace    func(string) (uint64, error)
-	upload       chan struct{}
+
+	// channel to ensure only 1 sites is being uploaded at the moment
+	upload chan struct{}
 
 	mu sync.Mutex // one Publish or Delete at a time
 }
@@ -124,66 +125,6 @@ func (site Site) URL() string {
 		return "/" + site.Path
 	}
 	return "/" + site.Path + "/"
-}
-
-// Publish unpacks a .tar.gz into a new folder and makes it the Site at path.
-// A replace keeps the Visibility and the archive state of the Site.
-func (s *Sites) Publish(ctx context.Context, path string, kind Kind, tarGz io.Reader) (Site, error) {
-	if _, _, err := s.Check(ctx, path); err != nil {
-		return Site{}, err
-	}
-	if kind != File && kind != Folder {
-		return Site{}, badUpload("unknown kind %q", kind)
-	}
-	select {
-	case s.upload <- struct{}{}:
-		defer func() { <-s.upload }()
-	default:
-		return Site{}, ErrUploadBusy
-	}
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return Site{}, err
-	}
-	if err := s.checkStorage(ctx); err != nil {
-		return Site{}, err
-	}
-	folder := path + "-" + uuid.NewString()
-	file, err := s.unpack(ctx, filepath.Join(s.dir, folder), kind, contextReader{ctx, tarGz})
-	if err != nil {
-		os.RemoveAll(filepath.Join(s.dir, folder))
-		if ctx.Err() != nil {
-			return Site{}, ctx.Err()
-		}
-		return Site{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		os.RemoveAll(filepath.Join(s.dir, folder))
-		return Site{}, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old, found, err := s.Get(ctx, path)
-	if err != nil {
-		os.RemoveAll(filepath.Join(s.dir, folder))
-		return Site{}, err
-	}
-	now := s.Now().Unix()
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO sites (path, kind, file, folder, visibility, archived, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-		 ON CONFLICT (path) DO UPDATE SET kind = excluded.kind, file = excluded.file,
-		   folder = excluded.folder, updated_at = excluded.updated_at`,
-		path, kind, file, folder, Private, now, now)
-	if err != nil {
-		os.RemoveAll(filepath.Join(s.dir, folder))
-		return Site{}, err
-	}
-	if found {
-		s.removeFolder(old.folder)
-	}
-	site, _, err := s.Get(ctx, path)
-	return site, err
 }
 
 // SetVisibility makes the Site at path Public or Private.

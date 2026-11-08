@@ -41,6 +41,8 @@ func New(s *sites.Sites, adminURL string) *Serving {
 
 func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// login routes for viewing private sites
 	if r.URL.Path == "/_shelf/login" {
 		s.viewLogin(w, r)
 		return
@@ -81,52 +83,22 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // serveSite serves a request for a Site. It reports true, and writes
 // nothing, when the Site got new files while it ran.
 func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool) {
-	path, rest, hasSlash := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	path, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	site, ok, err := s.Sites.Get(r.Context(), path)
 	if err != nil {
 		s.serverError(w, err)
 		return false
 	}
-	if !ok || site.Archived {
+	if !ok {
 		s.notFound(w, r)
 		return false
 	}
-	if site.Visibility == sites.Private {
-		allowed, err := s.ownerView(r)
-		if err != nil {
-			s.serverError(w, err)
-			return false
-		}
-		if !allowed {
-			s.notFound(w, r)
-			return false
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		w.Header().Set("Referrer-Policy", "same-origin")
+	if !s.authorizeSiteView(w, r, site) {
+		return false
 	}
-
-	name := site.File
-	if site.Kind == sites.File {
-		if hasSlash {
-			// links to /abcd/ gets redirected to /abcd instead of 404
-			if rest == "" {
-				redirect(w, r, "/"+path)
-				return false
-			}
-			s.notFound(w, r)
-			return false
-		}
-	} else {
-		// Links in the Site's HTML resolve from /path/, so send /path there.
-		if !hasSlash {
-			redirect(w, r, "/"+path+"/")
-			return false
-		}
-		name = rest
-		if name == "" || strings.HasSuffix(name, "/") {
-			name += "index.html"
-		}
+	name, ok := s.resolveSiteFile(w, r, site)
+	if !ok {
+		return false
 	}
 
 	f, err := s.Sites.Open(site, name)

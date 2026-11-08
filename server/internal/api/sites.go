@@ -3,10 +3,8 @@ package api
 import (
 	"context"
 	"errors"
-	"mime"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
@@ -28,9 +26,6 @@ func (a *API) siteResponse(s sites.Site) siteResponse {
 }
 
 func (a *API) checkPath(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.key(w, r); !ok {
-		return
-	}
 	site, taken, err := a.Sites.Check(r.Context(), r.PathValue("path"))
 	if err != nil {
 		siteError(w, err)
@@ -48,45 +43,21 @@ func (a *API) checkPath(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) uploadSite(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.key(w, r); !ok {
+	kind, ok := a.readUploadRequest(w, r)
+	if !ok {
 		return
 	}
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/gzip" {
-		writeError(w, http.StatusUnsupportedMediaType, "bad_request", "Send a .tar.gz with Content-Type: application/gzip.")
-		return
-	}
-	if r.Header.Get("Content-Encoding") != "" {
-		writeError(w, http.StatusUnsupportedMediaType, "bad_request", "Send raw gzip bytes without Content-Encoding.")
-		return
-	}
-	query := r.URL.Query()["kind"]
-	if len(query) != 1 || (query[0] != string(sites.File) && query[0] != string(sites.Folder)) {
-		writeError(w, http.StatusBadRequest, "bad_upload", "Set kind=file or kind=folder.")
-		return
-	}
-	if r.ContentLength > a.Sites.MaxUpload {
-		siteError(w, sites.ErrUploadTooLarge)
-		return
-	}
-	deadline := time.Now().Add(a.UploadTimeout)
-	ctx, cancel := context.WithDeadline(r.Context(), deadline)
-	defer cancel()
-	// A context deadline alone cannot interrupt a blocked request-body read.
-	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		serverError(w, err)
-		return
-	}
-	// Leave time to report a handler deadline to the client.
-	if err := controller.SetWriteDeadline(deadline.Add(30 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		serverError(w, err)
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, a.Sites.MaxUpload)
-	site, err := a.Sites.Publish(ctx, r.PathValue("path"), sites.Kind(query[0]), r.Body)
+	r, cancel, err := a.limitUploadRequest(w, r)
 	if err != nil {
-		if ctx.Err() != nil {
-			err = ctx.Err()
+		serverError(w, err)
+		return
+	}
+	defer cancel()
+
+	site, err := a.Sites.Publish(r.Context(), r.PathValue("path"), kind, r.Body)
+	if err != nil {
+		if r.Context().Err() != nil {
+			err = r.Context().Err()
 		}
 		siteError(w, err)
 		return
