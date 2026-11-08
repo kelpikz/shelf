@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kelpikz/shelf/server/internal/store"
 )
 
 func TestRefusedReplacementKeepsOldFiles(t *testing.T) {
@@ -151,3 +153,57 @@ func TestPublishChecksDiskBeforeReading(t *testing.T) {
 type mustNotRead struct{}
 
 func (mustNotRead) Read([]byte) (int, error) { panic("archive read before disk check") }
+
+type databaseFailureReader struct {
+	io.Reader
+	fail func()
+}
+
+func (r *databaseFailureReader) Read(p []byte) (int, error) {
+	if r.fail != nil {
+		r.fail()
+		r.fail = nil
+	}
+	return r.Reader.Read(p)
+}
+
+func TestFailedSiteInstallKeepsOldFilesAndReleasesSlot(t *testing.T) {
+	s, dir := newSites(t)
+	ctx := context.Background()
+	old, err := s.Publish(ctx, "notes", File, tarGz(t, entry{name: "old.txt", body: "old"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := &databaseFailureReader{
+		Reader: tarGz(t, entry{name: "new.txt", body: "new"}),
+		fail: func() {
+			if err := s.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	if _, err := s.Publish(ctx, "notes", File, archive); err == nil {
+		t.Fatal("upload succeeded after the database closed")
+	}
+	folders, err := os.ReadDir(filepath.Join(dir, "sites"))
+	if err != nil || len(folders) != 1 || folders[0].Name() != old.folder {
+		t.Fatalf("failed install changed the folders: %v, %v", folders, err)
+	}
+	f, err := s.Open(old, "old.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(f)
+	f.Close()
+	if err != nil || string(content) != "old" {
+		t.Fatalf("old content: %q, %v", content, err)
+	}
+	s.db, err = store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.db.Close() })
+	if _, err := s.Publish(ctx, "notes", File, tarGz(t, entry{name: "retry.txt", body: "ok"})); err != nil {
+		t.Fatalf("slot after failed install: %v", err)
+	}
+}

@@ -8,9 +8,6 @@ import (
 )
 
 func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.key(w, r); !ok {
-		return
-	}
 	all, err := a.Sites.List(r.Context())
 	if err != nil {
 		serverError(w, err)
@@ -26,9 +23,6 @@ func (a *API) listSites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) updateSite(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.key(w, r); !ok {
-		return
-	}
 	var change sites.Changes
 	if !readJSON(w, r, &change) {
 		return
@@ -42,9 +36,6 @@ func (a *API) updateSite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteSite(w http.ResponseWriter, r *http.Request) {
-	if _, ok := a.key(w, r); !ok {
-		return
-	}
 	if err := a.Sites.Delete(r.Context(), r.PathValue("path")); err != nil {
 		managementError(w, err)
 		return

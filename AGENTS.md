@@ -43,10 +43,15 @@ Building v1. The server has the GitHub login, the Admin page, the Sites part, Se
 
 ## Session notes
 
-At the end of each session, write a short note in `.scratch/sessionNotes/YYYY-MM-DD-<short-slug>.md`. Write what you did and what comes next.
+At the end of each session, write a short note in `.scratch/sessionNotes/YYYY-MM-DD-<short-slug>.md`. Write what you did and what comes next
+
+## Product Development
+If you think of any new features / improvement / suggestions / bugs which you encounter while doing your current task, but is out of scope
+Write a short note about it in docs/suggestions.md 
 
 ## Development Rules
 - Future schema changes must use migrations. Create a data backup first. If the backup fails, stop. Only then change the tables and rows.
+- Follow TDD, only write necessary tests which test the core functionality of a given module. 
 
 ## Commits
 

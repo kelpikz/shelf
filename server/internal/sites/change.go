@@ -8,6 +8,7 @@ import (
 )
 
 // Changes contains exactly one setting. The JSON tags are used by the CLI API.
+// TODO: add way to change the name of the site too...
 type Changes struct {
 	Visibility *Visibility `json:"visibility"`
 	Archived   *bool       `json:"archived"`

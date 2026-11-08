@@ -6,7 +6,7 @@
   {{if .Sites}}
   <ul class="sites">
     {{range .Sites}}
-    <li><a href="{{.URL}}">{{.Path}}</a> <time datetime="{{.UpdatedAt.UTC.Format "2006-01-02"}}">{{.UpdatedAt.UTC.Format "2 Jan 2006"}}</time></li>
+    <li><span><a href="{{.URL}}">{{.Path}}</a>{{if eq .Visibility "private"}} <span class="fine">private</span>{{end}}</span> <time datetime="{{.UpdatedAt.UTC.Format "2006-01-02"}}">{{.UpdatedAt.UTC.Format "2 Jan 2006"}}</time></li>
     {{end}}
   </ul>
   {{else}}

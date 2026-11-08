@@ -21,16 +21,16 @@ var files embed.FS
 
 type Serving struct {
 	Sites    *sites.Sites
-	AdminURL string // for the "Owner? Log in" link
-	FilesURL string
+	AdminURL string // origin of the admin host, for the view handoff
+	FilesURL string // origin of this host, for the Origin check
 	Sessions *auth.Sessions
 
 	pages  map[string]*template.Template
 	static http.Handler
 }
 
-func New(s *sites.Sites, adminURL string) *Serving {
-	sv := &Serving{Sites: s, AdminURL: adminURL, pages: map[string]*template.Template{}}
+func New(s *sites.Sites, sessions *auth.Sessions, adminURL, filesURL string) *Serving {
+	sv := &Serving{Sites: s, Sessions: sessions, AdminURL: adminURL, FilesURL: filesURL, pages: map[string]*template.Template{}}
 	for _, name := range []string{"index.html", "notfound.html"} {
 		sv.pages[name] = template.Must(template.ParseFS(files, "templates/base.html", "templates/"+name))
 	}
@@ -39,37 +39,32 @@ func New(s *sites.Sites, adminURL string) *Serving {
 	return sv
 }
 
-func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.URL.Path == "/_shelf/login" {
-		s.viewLogin(w, r)
-		return
-	}
-	if r.URL.Path == "/_shelf/view" {
-		s.finishView(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// Handler routes the Sites host. "GET" patterns also match HEAD, and the
+// mux answers other methods with 405 and an Allow header.
+func (s *Serving) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_shelf/login", s.viewLogin)
+	mux.HandleFunc("GET /_shelf/view", s.finishView)
+	// Site paths never have "_", so a Site cannot take these addresses.
+	mux.HandleFunc("GET /_shelf/", s.staticFile)
+	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /", s.site)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		mux.ServeHTTP(w, r)
+	})
+}
 
-	// Site paths never have "_", so a Site cannot take this address.
-	if strings.HasPrefix(r.URL.Path, "/_shelf/") {
-		w.Header().Set("Cache-Control", "no-cache")
-		s.static.ServeHTTP(w, r)
-		return
-	}
+func (s *Serving) staticFile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
+	s.static.ServeHTTP(w, r)
+}
 
-	if r.URL.Path == "/" {
-		s.index(w, r)
-		return
-	}
-
-	// A replace deletes the old folder. If that happens between the record
-	// lookup and the file open, look again: the record points to the new
-	// folder. Three tries are enough for replaces that come one after another.
+// site serves a file of a Site. A replace deletes the old folder. If that
+// happens between the record lookup and the file open, look again: the
+// record points to the new folder. Three tries are enough for replaces that
+// come one after another.
+func (s *Serving) site(w http.ResponseWriter, r *http.Request) {
 	for range 3 {
 		if !s.serveSite(w, r) {
 			return
@@ -81,52 +76,22 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // serveSite serves a request for a Site. It reports true, and writes
 // nothing, when the Site got new files while it ran.
 func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool) {
-	path, rest, hasSlash := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	path, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	site, ok, err := s.Sites.Get(r.Context(), path)
 	if err != nil {
 		s.serverError(w, err)
 		return false
 	}
-	if !ok || site.Archived {
+	if !ok {
 		s.notFound(w, r)
 		return false
 	}
-	if site.Visibility == sites.Private {
-		allowed, err := s.ownerView(r)
-		if err != nil {
-			s.serverError(w, err)
-			return false
-		}
-		if !allowed {
-			s.notFound(w, r)
-			return false
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		w.Header().Set("Referrer-Policy", "same-origin")
+	if !s.authorizeSiteView(w, r, site) {
+		return false
 	}
-
-	name := site.File
-	if site.Kind == sites.File {
-		if hasSlash {
-			// links to /abcd/ gets redirected to /abcd instead of 404
-			if rest == "" {
-				redirect(w, r, "/"+path)
-				return false
-			}
-			s.notFound(w, r)
-			return false
-		}
-	} else {
-		// Links in the Site's HTML resolve from /path/, so send /path there.
-		if !hasSlash {
-			redirect(w, r, "/"+path+"/")
-			return false
-		}
-		name = rest
-		if name == "" || strings.HasSuffix(name, "/") {
-			name += "index.html"
-		}
+	name, ok := s.resolveSiteFile(w, r, site)
+	if !ok {
+		return false
 	}
 
 	f, err := s.Sites.Open(site, name)
@@ -153,20 +118,26 @@ func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool)
 	return false
 }
 
-// index is the Index page: all Public Sites that are not archived.
+// index is the Index page: all Sites that are not archived. Private Sites
+// show only to a signed-in Owner.
 func (s *Serving) index(w http.ResponseWriter, r *http.Request) {
+	owner, err := s.ownerView(r)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
 	all, err := s.Sites.List(r.Context())
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	var public []sites.Site
+	var shown []sites.Site
 	for _, site := range all {
-		if site.Visibility == sites.Public && !site.Archived {
-			public = append(public, site)
+		if !site.Archived && (site.Visibility == sites.Public || owner) {
+			shown = append(shown, site)
 		}
 	}
-	s.render(w, r, http.StatusOK, "index.html", map[string]any{"Sites": public})
+	s.render(w, r, http.StatusOK, "index.html", map[string]any{"Sites": shown, "Owner": owner})
 }
 
 // redirect is a 302 with no-store. Chrome keeps a 301 for ever.
@@ -179,15 +150,16 @@ func redirect(w http.ResponseWriter, r *http.Request, to string) {
 }
 
 // notFound is the one page for a missing, archived, or Private Site.
+// A failed Owner check only shows the sign in link.
 func (s *Serving) notFound(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusNotFound, "notfound.html", nil)
+	owner, _ := s.ownerView(r)
+	s.render(w, r, http.StatusNotFound, "notfound.html", map[string]any{"Owner": owner})
 }
 
 func (s *Serving) render(w http.ResponseWriter, r *http.Request, status int, page string, data map[string]any) {
 	if data == nil {
 		data = map[string]any{}
 	}
-	data["AdminURL"] = s.AdminURL
 	data["ViewLoginURL"] = "/_shelf/login?" + url.Values{"return": {r.URL.RequestURI()}}.Encode()
 	var buf bytes.Buffer
 	if err := s.pages[page].ExecuteTemplate(&buf, "base", data); err != nil {

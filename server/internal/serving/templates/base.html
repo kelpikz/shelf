@@ -11,7 +11,7 @@
 <main class="page">
   <header class="brand">{{template "logo"}}<span>shelf</span></header>
   {{template "content" .}}
-  <footer class="fine"><a href="{{.ViewLoginURL}}">Owner? Log in</a></footer>
+  {{if not .Owner}}<footer class="fine"><a href="{{.ViewLoginURL}}">Sign in</a></footer>{{end}}
 </main>
 </body>
 </html>
