@@ -180,10 +180,10 @@ fn active_server() -> Result<(String, Source)> {
 }
 
 fn config_command(action: ConfigAction) -> Result<()> {
-    let path = config::path()?;
     match action {
         ConfigAction::Set { server } => {
             let server = server_url(Some(server))?;
+            let path = config::path()?;
             // The file holds only the server, so a broken file is safe to replace.
             let mut saved = config::load(&path).unwrap_or_default();
             saved.server = Some(server.clone());
@@ -200,9 +200,14 @@ fn config_command(action: ConfigAction) -> Result<()> {
         ConfigAction::Get { server: false } => {
             let (server, source) = active_server()?;
             println!("server  {server}  ({source})");
-            println!("file    {}", path.display());
+            // Same as active_server: no config folder means no config file.
+            match config::path() {
+                Ok(path) => println!("file    {}", path.display()),
+                Err(_) => println!("file    none (no config folder)"),
+            }
         }
         ConfigAction::Unset { .. } => {
+            let path = config::path()?;
             let mut saved = config::load(&path).unwrap_or_default();
             saved.server = None;
             config::save(&path, &saved)?;
