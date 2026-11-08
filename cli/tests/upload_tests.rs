@@ -28,6 +28,23 @@ struct Server {
 }
 
 impl Server {
+    fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_shelf"));
+        command
+            .env("SHELF_URL", &self.url)
+            .env("SHELF_KEY", "shelf_test_key")
+            .env("NO_COLOR", "1")
+            .env("NO_PROXY", "*")
+            .env("no_proxy", "*")
+            .env_remove("HTTP_PROXY")
+            .env_remove("HTTPS_PROXY")
+            .env_remove("ALL_PROXY")
+            .env_remove("http_proxy")
+            .env_remove("https_proxy")
+            .env_remove("all_proxy")
+            .stdin(Stdio::null());
+        command
+    }
     fn new(replies: Vec<Option<String>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -65,26 +82,133 @@ impl Server {
     }
 
     fn run(&self, source: &std::path::Path, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_shelf"))
+        self.command()
             .arg("upload")
             .arg(source)
             .arg("demo")
             .args(args)
-            .env("SHELF_URL", &self.url)
-            .env("SHELF_KEY", "shelf_test_key")
-            .env("NO_COLOR", "1")
-            .env("NO_PROXY", "*")
-            .env("no_proxy", "*")
-            .env_remove("HTTP_PROXY")
-            .env_remove("HTTPS_PROXY")
-            .env_remove("ALL_PROXY")
-            .env_remove("http_proxy")
-            .env_remove("https_proxy")
-            .env_remove("all_proxy")
-            .stdin(Stdio::null())
             .output()
             .unwrap()
     }
+}
+
+#[test]
+fn list_aligns_columns_and_keeps_piped_output_plain() {
+    let mut longer = site("public", false);
+    longer["path"] = json!("longer");
+    longer["url"] = json!("https://files.example.com/longer");
+    let server = Server::new(vec![reply(
+        200,
+        &json!([site("private", false), longer]).to_string(),
+    )]);
+    let result = server
+        .command()
+        .arg("list")
+        .env_remove("NO_COLOR")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("FORCE_COLOR")
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{}", output(&result));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout).replace("\r\n", "\n"),
+        concat!(
+            "SITE    VISIBILITY  URL\n",
+            "demo    private     https://files.example.com/demo\n",
+            "longer  public      https://files.example.com/longer\n",
+        )
+    );
+}
+
+#[test]
+fn list_all_keeps_archived_labels_and_url_alignment() {
+    let server = Server::new(vec![reply(
+        200,
+        &json!([site("private", true), site("public", false)]).to_string(),
+    )]);
+    let result = server.command().args(["list", "--all"]).output().unwrap();
+    assert!(result.status.success(), "{}", output(&result));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout).replace("\r\n", "\n"),
+        concat!(
+            "SITE  VISIBILITY          URL\n",
+            "demo  private / archived  https://files.example.com/demo\n",
+            "demo  public              https://files.example.com/demo\n",
+        )
+    );
+    assert!(
+        server.requests.lock().unwrap()[0]
+            .line
+            .contains("/sites?all=true")
+    );
+}
+
+#[test]
+fn list_empty_has_no_table_header() {
+    let server = Server::new(vec![reply(200, "[]")]);
+    let result = server.command().arg("list").output().unwrap();
+    assert!(result.status.success(), "{}", output(&result));
+    assert_eq!(String::from_utf8_lossy(&result.stdout).trim(), "No Sites.");
+}
+
+#[test]
+fn management_writes_report_unknown_results_without_replay() {
+    for response in [
+        reply(
+            500,
+            r#"{"error":{"code":"server_error","message":"Something went wrong."}}"#,
+        ),
+        reply(502, "proxy error"),
+        reply(408, "timeout"),
+        reply(200, "invalid JSON"),
+        reply(200, &site("private", false).to_string()),
+    ] {
+        let server = Server::new(vec![response]);
+        let result = server.command().args(["public", "demo"]).output().unwrap();
+        assert!(!result.status.success());
+        assert!(
+            output(&result).contains("may already have changed"),
+            "{}",
+            output(&result)
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+    let server = Server::new(vec![
+        reply(
+            200,
+            r#"{"taken":true,"site":{"path":"demo","kind":"file","file":"note.txt","visibility":"private","archived":false,"updated_at":1,"url":"https://files.example.com/demo"}}"#,
+        ),
+        reply(502, "proxy error"),
+    ]);
+    let mut child = server
+        .command()
+        .args(["delete", "demo"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"demo\n").unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(!result.status.success());
+    assert!(
+        output(&result).contains("may already have changed"),
+        "{}",
+        output(&result)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn management_refusals_keep_the_server_message() {
+    let server = Server::new(vec![reply(
+        401,
+        r#"{"error":{"code":"unauthorized","message":"Log in with: shelf login"}}"#,
+    )]);
+    let result = server.command().args(["archive", "demo"]).output().unwrap();
+    assert!(!result.status.success());
+    assert!(output(&result).contains("shelf login"));
+    assert!(!output(&result).contains("may already have changed"));
 }
 
 impl Drop for Server {

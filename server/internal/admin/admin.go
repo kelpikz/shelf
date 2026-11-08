@@ -38,6 +38,7 @@ func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", a.home)
 	mux.HandleFunc("GET /login", a.login)
+	mux.HandleFunc("GET /view", a.view)
 	mux.HandleFunc("GET /auth/github", a.startLogin)
 	mux.HandleFunc("GET /auth/github/callback", a.finishLogin)
 	mux.HandleFunc("POST /logout", a.logout)

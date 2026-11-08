@@ -228,11 +228,11 @@ func TestHiddenSitesLookLikeMissingOnes(t *testing.T) {
 		if resp.Header.Get("Cache-Control") != "no-store" {
 			t.Errorf("%s: missing no-store", target)
 		}
-		if got := body(resp); got != want {
+		if got := body(resp); strings.ReplaceAll(got, url.QueryEscape(target), url.QueryEscape("/missing")) != want {
 			t.Errorf("%s: the page is different from the page for a missing Site", target)
 		}
 	}
-	if !strings.Contains(want, `href="`+adminURL+`/login"`) {
+	if !strings.Contains(want, `href="/_shelf/login?return=%2Fmissing"`) {
 		t.Error("the not found page has no Owner login link")
 	}
 }
@@ -345,7 +345,7 @@ func TestAdminPageListsSites(t *testing.T) {
 	if notes < 0 || archived < 0 || old < archived {
 		t.Errorf("want notes, then the Archived list with old-demo; got positions %d, %d, %d", notes, archived, old)
 	}
-	if !strings.Contains(page, filesURL+"/notes/") {
+	if !strings.Contains(page, filesURL+"/_shelf/login?return=%2fnotes%2f") {
 		t.Error("no link to the Site")
 	}
 }

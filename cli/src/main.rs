@@ -3,6 +3,7 @@ mod client;
 mod keystore;
 mod links;
 mod login;
+mod manage;
 mod pack;
 mod secrets;
 mod ui;
@@ -19,7 +20,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use reqwest::Url;
 
-use client::Client;
+use client::{Client, SiteChange, Visibility};
 use ui::{BOLD, CODE, LINK};
 
 const DEFAULT_SERVER: &str = "https://files-admin.ajitha.fyi";
@@ -33,6 +34,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List Public and Private Sites
+    List {
+        /// Include Archived Sites
+        #[arg(long)]
+        all: bool,
+    },
+    /// Make a Site Public
+    Public { path: String },
+    /// Make a Site Private
+    Private { path: String },
+    /// Take a Site offline
+    Archive { path: String },
+    /// Put an Archived Site back online
+    Unarchive { path: String },
+    /// Delete a Site and its files. Type its path to confirm.
+    Delete { path: String },
     /// Log in through the browser
     Login,
     /// Cancel the key and delete it from this computer
@@ -71,6 +88,16 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = server_url(env::var("SHELF_URL").ok()).and_then(|server| match cli.command {
+        Command::List { all } => manage::list(&server, all),
+        Command::Public { path } => {
+            manage::change(&server, &path, SiteChange::Visibility(Visibility::Public))
+        }
+        Command::Private { path } => {
+            manage::change(&server, &path, SiteChange::Visibility(Visibility::Private))
+        }
+        Command::Archive { path } => manage::change(&server, &path, SiteChange::Archived(true)),
+        Command::Unarchive { path } => manage::change(&server, &path, SiteChange::Archived(false)),
+        Command::Delete { path } => manage::delete(&server, &path),
         Command::Login => login(&server),
         Command::Logout => logout(&server),
         Command::Status => status(&server),
