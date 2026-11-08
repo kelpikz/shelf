@@ -1,5 +1,6 @@
 mod checks;
 mod client;
+mod config;
 mod keystore;
 mod links;
 mod login;
@@ -21,6 +22,7 @@ use clap::{Parser, Subcommand};
 use reqwest::Url;
 
 use client::{Client, SiteChange, Visibility};
+use config::Source;
 use ui::{BOLD, CODE, LINK};
 
 const DEFAULT_SERVER: &str = "https://files-admin.ajitha.fyi";
@@ -83,11 +85,53 @@ enum Command {
         #[arg(long)]
         allow_secrets: bool,
     },
+    /// Show or change the settings of this CLI, for example the server
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Save a setting
+    Set {
+        /// The server address, for example https://files-admin.ajitha.fyi
+        #[arg(long)]
+        server: String,
+    },
+    /// Show all the settings, or only one
+    Get {
+        /// Show only the server address
+        #[arg(long)]
+        server: bool,
+    },
+    /// Remove a setting. Then the CLI uses the default.
+    Unset {
+        /// Remove the saved server
+        #[arg(long, required = true)]
+        server: bool,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = server_url(env::var("SHELF_URL").ok()).and_then(|server| match cli.command {
+    let result = match cli.command {
+        // No server check first: this command must work to fix a bad saved server.
+        Command::Config { action } => config_command(action),
+        command => active_server().and_then(|(server, _)| run(&server, command)),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            ui::error(&e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(server: &str, command: Command) -> Result<()> {
+    match command {
         Command::List { all } => manage::list(&server, all),
         Command::Public { path } => {
             manage::change(&server, &path, SiteChange::Visibility(Visibility::Public))
@@ -112,27 +156,81 @@ fn main() -> ExitCode {
             yes,
             allow_secrets,
         } => upload::run(&server, &source, &path, yes, allow_secrets),
-    });
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            ui::error(&e);
-            ExitCode::FAILURE
-        }
+        Command::Config { .. } => unreachable!("handled in main"),
     }
 }
 
-/// SHELF_URL, or the default server. The key goes over this connection, so
+/// SHELF_URL, then the server in the config file, then the default.
+fn active_server() -> Result<(String, Source)> {
+    let env = env::var("SHELF_URL").ok();
+    // Read the file only when needed: a bad file must not block SHELF_URL.
+    let saved = match env {
+        Some(_) => None,
+        None => match config::path() {
+            Ok(path) => config::load(&path)?.server,
+            Err(_) => None,
+        },
+    };
+    let (raw, source) = config::pick(env, saved);
+    let server = server_url(raw).with_context(|| match source {
+        Source::Env => "SHELF_URL is not valid.",
+        _ => "The server in the config file is not valid. Run: shelf config set --server <url>",
+    })?;
+    Ok((server, source))
+}
+
+fn config_command(action: ConfigAction) -> Result<()> {
+    match action {
+        ConfigAction::Set { server } => {
+            let server = server_url(Some(server))?;
+            let path = config::path()?;
+            // The file holds only the server, so a broken file is safe to replace.
+            let mut saved = config::load(&path).unwrap_or_default();
+            saved.server = Some(server.clone());
+            config::save(&path, &saved)?;
+            ui::ok(format_args!("Server is now {BOLD}{server}{BOLD:#}"));
+            if env::var("SHELF_URL").is_ok() {
+                ui::warn("SHELF_URL is set. The CLI uses it in place of this server.");
+            } else if env_key().is_none() && keystore::load(&server).ok().flatten().is_none() {
+                ui::detail("You are not logged in to this server.");
+                ui::hint("shelf login");
+            }
+        }
+        ConfigAction::Get { server: true } => println!("{}", active_server()?.0),
+        ConfigAction::Get { server: false } => {
+            let (server, source) = active_server()?;
+            println!("server  {server}  ({source})");
+            // Same as active_server: no config folder means no config file.
+            match config::path() {
+                Ok(path) => println!("file    {}", path.display()),
+                Err(_) => println!("file    none (no config folder)"),
+            }
+        }
+        ConfigAction::Unset { .. } => {
+            let path = config::path()?;
+            let mut saved = config::load(&path).unwrap_or_default();
+            saved.server = None;
+            config::save(&path, &saved)?;
+            let (server, source) = active_server()?;
+            ui::ok(format_args!(
+                "Server is now {BOLD}{server}{BOLD:#} ({source})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The given address, or the default server. The key goes over this connection, so
 /// plain http is only for local dev. The parsed host is checked, not the
 /// text: in "http://localhost:80@remote.example" the host is remote.example.
 fn server_url(from_env: Option<String>) -> Result<String> {
     let raw = from_env.unwrap_or_else(|| DEFAULT_SERVER.into());
-    let url = Url::parse(&raw).context("SHELF_URL is not a valid address.")?;
+    let url = Url::parse(&raw).context("The server is not a valid address.")?;
     let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
     match url.scheme() {
         "https" => {}
         "http" if local => {}
-        _ => bail!("SHELF_URL must start with https://. Only localhost can use http://."),
+        _ => bail!("The server must start with https://. Only localhost can use http://."),
     }
     if !url.username().is_empty()
         || url.password().is_some()
@@ -140,7 +238,7 @@ fn server_url(from_env: Option<String>) -> Result<String> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        bail!("SHELF_URL must be only the server address, for example {DEFAULT_SERVER}");
+        bail!("The server must be only an address, for example {DEFAULT_SERVER}");
     }
     Ok(url.origin().ascii_serialization())
 }
