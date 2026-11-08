@@ -7,7 +7,7 @@ Keep the existing nginx on the host.
 ## Set the config
 
 ```sh
-cp server/env.prod.example .env
+cp server/prod.example.env .env
 chmod 600 .env
 ```
 
@@ -66,7 +66,7 @@ docker compose create --no-build shelf
 docker compose ps --all
 ```
 
-For a new local setup, copy `server/env.local.example` to `server/.env` and fill in the values.
+For a new local setup, copy `server/local.example.env` to `server/.env` and fill in the values.
 Keep your existing `server/.env` if it is already configured.
 For local Docker use, add `--env-file server/.env` after `docker compose` in each command.
 The local volume starts empty. It does not copy your existing development data.
