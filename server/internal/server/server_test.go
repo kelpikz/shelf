@@ -220,7 +220,7 @@ func TestHiddenSitesLookLikeMissingOnes(t *testing.T) {
 	}
 
 	want := body(ts.get(filesURL + "/missing"))
-	for _, target := range []string{"/draft", "/draft/", "/old", "/old/", "/missing", "/Draft", "/draft/../old/"} {
+	for _, target := range []string{"/draft", "/draft/", "/old", "/old/", "/missing", "/Draft"} {
 		resp := ts.get(filesURL + target)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("%s: got %d %q", target, resp.StatusCode, resp.Header.Get("Location"))
@@ -232,8 +232,12 @@ func TestHiddenSitesLookLikeMissingOnes(t *testing.T) {
 			t.Errorf("%s: the page is different from the page for a missing Site", target)
 		}
 	}
+	// The mux cleans the path first, the same for every Site.
+	if resp := ts.get(filesURL + "/draft/../old/"); resp.StatusCode != http.StatusTemporaryRedirect || resp.Header.Get("Location") != "/old/" {
+		t.Errorf("unclean path: got %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
 	if !strings.Contains(want, `href="/_shelf/login?return=%2Fmissing"`) {
-		t.Error("the not found page has no Owner login link")
+		t.Error("the not found page has no sign in link")
 	}
 }
 
@@ -263,6 +267,9 @@ func TestIndexPageListsOnlyPublicSites(t *testing.T) {
 		if strings.Contains(page, "/"+hidden) {
 			t.Errorf("%s is on the Index page", hidden)
 		}
+	}
+	if !strings.Contains(page, `href="/_shelf/login?return=%2F"`) {
+		t.Error("no sign in link")
 	}
 }
 
@@ -332,6 +339,7 @@ func TestAdminPageListsSites(t *testing.T) {
 	ctx := context.Background()
 	ts.publish(t, "notes", map[string]string{"index.html": "notes"})
 	ts.publish(t, "old-demo", map[string]string{"index.html": "old"})
+	ts.sites.SetVisibility(ctx, "old-demo", sites.Public)
 	ts.sites.SetArchived(ctx, "old-demo", true)
 	c, _ := ts.login(t)
 
@@ -347,6 +355,9 @@ func TestAdminPageListsSites(t *testing.T) {
 	}
 	if !strings.Contains(page, filesURL+"/_shelf/login?return=%2fnotes%2f") {
 		t.Error("no link to the Site")
+	}
+	if !strings.Contains(page, filesURL+"/_shelf/login?return=%2fold-demo%2f") {
+		t.Error("the Archived Site link does not sign in first")
 	}
 }
 

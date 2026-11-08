@@ -44,7 +44,7 @@ enum Command {
     Public { path: String },
     /// Make a Site Private
     Private { path: String },
-    /// Take a Site offline
+    /// Take a Site offline for Visitors
     Archive { path: String },
     /// Put an Archived Site back online
     Unarchive { path: String },

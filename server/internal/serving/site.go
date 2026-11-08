@@ -7,14 +7,10 @@ import (
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
-// authorizeSiteView writes the same not-found page for an Archived Site
-// and a Private Site that the Visitor cannot see.
+// authorizeSiteView lets everyone see a live Public Site. Only the signed-in
+// Owner sees a Private or Archived Site; others get the not-found page.
 func (s *Serving) authorizeSiteView(w http.ResponseWriter, r *http.Request, site sites.Site) bool {
-	if site.Archived {
-		s.notFound(w, r)
-		return false
-	}
-	if site.Visibility != sites.Private {
+	if site.Visibility == sites.Public && !site.Archived {
 		return true
 	}
 	allowed, err := s.ownerView(r)

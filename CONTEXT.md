@@ -25,11 +25,11 @@ Who can see a Site. A Site is **Public** (anyone can see it, and it is on the In
 _Avoid_: access level, published, unpublished
 
 **Archived**:
-A Site that is offline for everyone, and that includes the Owner. It keeps its path, files, Visibility, and views. Unarchive puts it back online as it was before. A Private Site is different: it is online, but only the Owner can see it.
+A Site that is offline for Visitors. The signed-in Owner can still open it. It keeps its path, files, Visibility, and views. Unarchive puts it back online as it was before. A Private Site is different: it is online, but only the Owner can see it.
 _Avoid_: hidden, disabled, inactive
 
 **Index page**:
-The page at `files.ajitha.fyi/`. It lists all Public Sites. Archived and Private Sites are not on it. It is not the `index.html` file of a folder Site.
+The page at `files.ajitha.fyi/`. It lists all Public Sites. The signed-in Owner also sees the Private Sites. Archived Sites are not on it. It is not the `index.html` file of a folder Site.
 _Avoid_: home page, directory, listing
 
 ### Tools

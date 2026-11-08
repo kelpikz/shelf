@@ -133,7 +133,8 @@ func (s *Sites) SetVisibility(ctx context.Context, path string, v Visibility) er
 	return err
 }
 
-// SetArchived takes the Site at path offline for everyone, or puts it back.
+// SetArchived takes the Site at path offline for Visitors, or puts it back.
+// The signed-in Owner can still open it.
 func (s *Sites) SetArchived(ctx context.Context, path string, archived bool) error {
 	_, err := s.Change(ctx, path, Changes{Archived: &archived})
 	return err

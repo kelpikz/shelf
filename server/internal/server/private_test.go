@@ -5,8 +5,60 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/kelpikz/shelf/server/internal/sites"
 )
+
+// viewCookie signs the Owner in on the files host without the redirects.
+func (ts *testServer) viewCookie(t *testing.T) *http.Cookie {
+	t.Helper()
+	admin, _ := ts.login(t)
+	state := "browser-state"
+	code, err := ts.sessions.StartView(context.Background(), admin.Value, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, ok, err := ts.sessions.FinishView(context.Background(), code, state)
+	if err != nil || !ok {
+		t.Fatalf("finish view: %v %v", ok, err)
+	}
+	return &http.Cookie{Name: "__Host-shelf_view", Value: token}
+}
+
+func TestIndexPageShowsPrivateSitesToSignedInOwner(t *testing.T) {
+	ts := newServer(t)
+	ctx := context.Background()
+	ts.publish(t, "notes", map[string]string{"index.html": "notes"})
+	ts.publish(t, "draft", map[string]string{"index.html": "draft"})
+	ts.publish(t, "old", map[string]string{"index.html": "old"})
+	ts.sites.SetVisibility(ctx, "notes", sites.Public)
+	ts.sites.SetArchived(ctx, "old", true)
+	view := ts.viewCookie(t)
+	get := func(target string) (int, string) {
+		r := httptest.NewRequest("GET", filesURL+target, nil)
+		r.AddCookie(view)
+		w := httptest.NewRecorder()
+		ts.h.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+
+	code, page := get("/")
+	if code != http.StatusOK {
+		t.Fatalf("index: got %d", code)
+	}
+	if !strings.Contains(page, `href="/notes/"`) || !strings.Contains(page, `href="/draft/"`) {
+		t.Error("Owner does not see all live Sites")
+	}
+	if strings.Contains(page, "/old") || strings.Contains(page, "/_shelf/login") {
+		t.Error("Owner sees an Archived Site or the sign in link")
+	}
+	code, page = get("/missing")
+	if code != http.StatusNotFound || strings.Contains(page, "/_shelf/login") {
+		t.Errorf("not found: got %d, or the sign in link shows to the Owner", code)
+	}
+}
 
 func TestPrivateSiteBrowserHandoff(t *testing.T) {
 	ts := newServer(t)
@@ -119,9 +171,17 @@ func TestPrivateSiteBrowserHandoff(t *testing.T) {
 		t.Fatalf("cross-site subresource: %d", w.Code)
 	}
 	ts.sites.SetArchived(context.Background(), "draft", true)
-	if resp := request(filesURL+"/draft/", view); resp.StatusCode != 404 {
-		t.Fatal("Owner can view Archived Site")
+	if resp := request(filesURL+"/draft/", view); resp.StatusCode != 200 || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("Owner cannot view Archived Site: %d", resp.StatusCode)
 	}
+	ts.sites.SetVisibility(context.Background(), "draft", sites.Public)
+	if resp := request(filesURL + "/draft/"); resp.StatusCode != 404 {
+		t.Fatal("Visitor can view Archived Public Site")
+	}
+	if resp := request(filesURL+"/draft/", view); resp.StatusCode != 200 {
+		t.Fatal("Owner cannot view Archived Public Site")
+	}
+	ts.sites.SetVisibility(context.Background(), "draft", sites.Private)
 	ts.sites.SetArchived(context.Background(), "draft", false)
 	ts.sessions.Delete(context.Background(), adminCookie.Value)
 	if resp := request(filesURL+"/draft/", view); resp.StatusCode != 404 {

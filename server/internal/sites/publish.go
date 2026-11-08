@@ -31,6 +31,7 @@ func (s *Sites) Publish(ctx context.Context, path string, kind Kind, tarGz io.Re
 	return s.installSite(ctx, staged)
 }
 
+// validateUpload checks the path and kind before taking the upload slot.
 func (s *Sites) validateUpload(ctx context.Context, path string, kind Kind) error {
 	if _, _, err := s.Check(ctx, path); err != nil {
 		return err
@@ -41,6 +42,8 @@ func (s *Sites) validateUpload(ctx context.Context, path string, kind Kind) erro
 	return nil
 }
 
+// beginUpload takes the one upload slot without waiting. It returns
+// ErrUploadBusy if another upload holds it. Call release when done.
 func (s *Sites) beginUpload() (release func(), err error) {
 	select {
 	case s.upload <- struct{}{}:
@@ -50,6 +53,7 @@ func (s *Sites) beginUpload() (release func(), err error) {
 	}
 }
 
+// prepareUploadStorage makes the data dir and checks the free disk space.
 func (s *Sites) prepareUploadStorage(ctx context.Context) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -64,6 +68,8 @@ type stagedUpload struct {
 	installed               bool
 }
 
+// stageUpload unpacks into a new <path>-<uuid> folder. The live Site does
+// not change. On error or cancel, the folder is removed.
 func (s *Sites) stageUpload(ctx context.Context, path string, kind Kind, tarGz io.Reader) (*stagedUpload, error) {
 	upload := &stagedUpload{path: path, kind: kind, folder: path + "-" + uuid.NewString()}
 	upload.dir = filepath.Join(s.dir, upload.folder)
@@ -79,6 +85,7 @@ func (s *Sites) stageUpload(ctx context.Context, path string, kind Kind, tarGz i
 	return upload, nil
 }
 
+// discard removes the staged folder unless installSite put it live.
 func (u *stagedUpload) discard() {
 	if !u.installed {
 		os.RemoveAll(u.dir)
