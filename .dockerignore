@@ -1,0 +1,15 @@
+# Only the server source and module files enter the build context.
+**
+!Dockerfile
+!.dockerignore
+!server/
+!server/**/
+!server/**/*.go
+!server/go.mod
+!server/go.sum
+!server/internal/admin/templates/*.html
+!server/internal/admin/static/*
+!server/internal/serving/templates/*.html
+!server/internal/serving/static/*
+# Do not include uploaded Go files from local server data.
+server/data/

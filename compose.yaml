@@ -1,0 +1,36 @@
+name: shelf
+
+services:
+  shelf:
+    image: shelf:local
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      OWNER_EMAIL: ${OWNER_EMAIL:?Set OWNER_EMAIL in .env}
+      OWNER_GITHUB_ID: ${OWNER_GITHUB_ID:?Set OWNER_GITHUB_ID in .env}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in .env}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET in .env}
+      ADMIN_URL: ${ADMIN_URL:?Set ADMIN_URL in .env}
+      FILES_URL: ${FILES_URL:?Set FILES_URL in .env}
+      DATA_DIR: /data
+      PORT: "8080"
+      UPLOAD_MIN_FREE_BYTES: ${UPLOAD_MIN_FREE_BYTES:-1073741824}
+      SITE_STORAGE_MAX_BYTES: ${SITE_STORAGE_MAX_BYTES:-1073741824}
+    volumes:
+      - data:/data
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  data:
