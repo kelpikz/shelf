@@ -38,13 +38,26 @@ The site is currently live at https://files.ajitha.fyi
 
 ### Install
 
-Install Rust, then build the CLI from this repo:
+Download the archive for your system from the [latest release](https://github.com/kelpikz/shelf/releases/latest):
+
+| System | File |
+|---|---|
+| Windows (x64) | `shelf-<version>-x86_64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `shelf-<version>-aarch64-apple-darwin.tar.gz` |
+| Linux (x64) | `shelf-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+
+Unpack it, and put `shelf` (or `shelf.exe`) in a folder on your `PATH`. Use `SHA256SUMS` to check the download.
+
+The files are not signed, so your system can show a warning:
+
+- **Windows:** SmartScreen can say "Windows protected your PC". Click "More info", then "Run anyway".
+- **macOS:** remove the quarantine flag with `xattr -d com.apple.quarantine ./shelf`.
+
+To build from source instead, install Rust 1.85 or later, then run:
 
 ```sh
 cargo install --path cli
 ```
-
-This puts the `shelf` command on your `PATH`.
 
 ### Log in
 
