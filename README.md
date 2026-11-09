@@ -23,12 +23,18 @@ I made it to learn, and I use it every day. It runs at [files.ajitha.fyi](https:
 
 ## Screenshots
 
-<!--
-TODO: add the screenshots to assets/screenshots/, then remove this comment.
+**Upload a folder, then make it Public:**
+
+![An upload in the terminal](assets/screenshots/cli-upload.png)
+
+**The Index page lists the Public Sites:**
 
 ![The Index page](assets/screenshots/index-page.png)
+
+<!-- TODO: add assets/screenshots/admin-page.png
+**The Admin page:**
+
 ![The Admin page](assets/screenshots/admin-page.png)
-![An upload in the terminal](assets/screenshots/cli-upload.png)
 -->
 
 ## How it works
