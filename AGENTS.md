@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`shelf` is a personal host for static files. The Owner uploads a file or a folder with a CLI, and the server serves it at `files.ajitha.fyi/<path>`. Ajitha is the Owner. The project is for learning, for personal use, for a resume, and for an article. The repo will be public.
+`shelf` is a personal host for static files. The Owner uploads a file or a folder with a CLI, and the server serves it at `files.ajitha.fyi/<path>`. Ajitha is the Owner. The project is for learning and for personal use. The repo is public.
 
 ## Status
 
@@ -10,7 +10,7 @@ Building v1. The server has the GitHub login, the Admin page, the Sites part, Se
 
 - **Server:** Go and SQLite, in `server/`. One process serves two hosts: `files.ajitha.fyi` (the Sites and the Index page) and the admin host, for example `files-admin.ajitha.fyi` (the Admin page and the API).
 - **CLI:** Rust, in `cli/`. The command is `shelf`.
-- **Deploy:** one Docker image with one data volume. It runs behind the nginx that is on the droplet (DigitalOcean, 1 vCPU, 1 GB RAM). The Owner does the deploy.
+- **Deploy:** one Docker image with one data volume. It runs behind the nginx that is on the Owner's server. The Owner does the deploy.
 
 ## Where things are
 
