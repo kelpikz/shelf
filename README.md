@@ -31,11 +31,9 @@ I made it to learn, and I use it every day. It runs at [files.ajitha.fyi](https:
 
 ![The Index page](assets/screenshots/index-page.png)
 
-<!-- TODO: add assets/screenshots/admin-page.png
-**The Admin page:**
+**The Admin page manages Public, Private, and Archived Sites:**
 
 ![The Admin page](assets/screenshots/admin-page.png)
--->
 
 ## How it works
 
