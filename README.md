@@ -38,13 +38,11 @@ The site is currently live at https://files.ajitha.fyi
 
 ### Install
 
-Install Rust, then build the CLI from this repo:
+Download `shelf` for Windows, macOS, or Linux from the [latest release](https://github.com/kelpikz/shelf/releases/latest), and put it on your `PATH`. Or build it with Rust 1.85+:
 
 ```sh
 cargo install --path cli
 ```
-
-This puts the `shelf` command on your `PATH`.
 
 ### Log in
 
