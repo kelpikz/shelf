@@ -132,20 +132,20 @@ fn main() -> ExitCode {
 
 fn run(server: &str, command: Command) -> Result<()> {
     match command {
-        Command::List { all } => manage::list(&server, all),
+        Command::List { all } => manage::list(server, all),
         Command::Public { path } => {
-            manage::change(&server, &path, SiteChange::Visibility(Visibility::Public))
+            manage::change(server, &path, SiteChange::Visibility(Visibility::Public))
         }
         Command::Private { path } => {
-            manage::change(&server, &path, SiteChange::Visibility(Visibility::Private))
+            manage::change(server, &path, SiteChange::Visibility(Visibility::Private))
         }
-        Command::Archive { path } => manage::change(&server, &path, SiteChange::Archived(true)),
-        Command::Unarchive { path } => manage::change(&server, &path, SiteChange::Archived(false)),
-        Command::Delete { path } => manage::delete(&server, &path),
-        Command::Login => login(&server),
-        Command::Logout => logout(&server),
-        Command::Status => status(&server),
-        Command::Set { name } => set_name(&server, &name),
+        Command::Archive { path } => manage::change(server, &path, SiteChange::Archived(true)),
+        Command::Unarchive { path } => manage::change(server, &path, SiteChange::Archived(false)),
+        Command::Delete { path } => manage::delete(server, &path),
+        Command::Login => login(server),
+        Command::Logout => logout(server),
+        Command::Status => status(server),
+        Command::Set { name } => set_name(server, &name),
         Command::Check {
             path,
             allow_secrets,
@@ -155,7 +155,7 @@ fn run(server: &str, command: Command) -> Result<()> {
             path,
             yes,
             allow_secrets,
-        } => upload::run(&server, &source, &path, yes, allow_secrets),
+        } => upload::run(server, &source, &path, yes, allow_secrets),
         Command::Config { .. } => unreachable!("handled in main"),
     }
 }
