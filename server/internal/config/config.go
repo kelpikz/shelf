@@ -30,6 +30,9 @@ type Config struct {
 	Port                string
 	UploadMinFreeBytes  uint64
 	SiteStorageMaxBytes int64
+	MCPResourceURL      string
+	MCPClientID         string
+	MCPRedirectURIs     []string
 }
 
 // Load reads the config. Values from a local .env file are used only when the
@@ -100,6 +103,9 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("SITE_STORAGE_MAX_BYTES must be a nonnegative byte count")
 	}
 
+	if err := configureMCP(&c, os.Getenv("MCP_RESOURCE_URL"), envOr("MCP_CLIENT_ID", "shelf-mcp"), os.Getenv("MCP_REDIRECT_URIS")); err != nil {
+		return Config{}, err
+	}
 	return c, nil
 }
 

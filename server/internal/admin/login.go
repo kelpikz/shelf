@@ -17,7 +17,7 @@ var loginErrors = map[string]string{
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.session(w, r); ok {
-		http.Redirect(w, r, viewContinuation(r), http.StatusSeeOther)
+		http.Redirect(w, r, loginContinuation(r), http.StatusSeeOther)
 		return
 	}
 	a.render(w, http.StatusOK, "login.html", map[string]any{"Error": loginErrors[r.URL.Query().Get("error")]})
@@ -92,8 +92,9 @@ func (a *App) finishLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, token, sess.ExpiresAt)
 	log.Printf("login: owner %s", id.Login)
-	next := viewContinuation(r)
+	next := loginContinuation(r)
 	clearCookie(w, viewNextCookie)
+	clearCookie(w, oauthNextCookie)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 

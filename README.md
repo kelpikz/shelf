@@ -36,9 +36,14 @@ The site is currently live at https://files.ajitha.fyi
 
 ## The CLI
 
+### Test MCP login
+
+The MCP auth base reuses the Owner's GitHub login. It has one protected tool, `shelf_status`.
+See [mcp/README.md](mcp/README.md) for the local test. Site tools are not part of this base yet.
+
 ### Install
 
-Download `shelf` for Windows, macOS, or Linux from the [latest release](https://github.com/kelpikz/shelf/releases/latest), and put it on your `PATH`. Or build it with Rust 1.85+:
+Download `shelf` for Windows, macOS, or Linux from the [latest release](https://github.com/kelpikz/shelf/releases/latest), and put it on your `PATH`. Or build it with the current stable Rust toolchain:
 
 ```sh
 cargo install --path cli

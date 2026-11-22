@@ -1,0 +1,21 @@
+{{define "title"}}Approve MCP access{{end}}
+{{define "content"}}
+<main class="center">
+  <section class="card login cli">
+    <div class="brand">{{template "logo"}}<span>shelf</span><span class="tag">MCP</span></div>
+    <h1>Approve this connection?</h1>
+    <p>Client: <strong>{{.Client}}</strong></p>
+    <p>It can check your MCP connection status. It cannot upload, change, or delete Sites.</p>
+    <p class="muted">Return address: {{.Redirect}}</p>
+    <p class="fine">Approve only if you started this connection. Access lasts up to 30 days unless you revoke it.</p>
+    <form method="post" action="/oauth/authorize">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="request" value="{{.Request}}">
+      <div class="choice">
+        <button class="btn btn-ghost" name="decision" value="deny">Deny</button>
+        <button class="btn btn-github" name="decision" value="approve">Approve</button>
+      </div>
+    </form>
+  </section>
+</main>
+{{end}}

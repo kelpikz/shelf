@@ -16,9 +16,11 @@ import (
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
-func New(cfg config.Config, p auth.Provider, sessions *auth.Sessions, cli *auth.CLI, s *sites.Sites) http.Handler {
+func New(cfg config.Config, p auth.Provider, sessions *auth.Sessions, cli *auth.CLI, s *sites.Sites, oauth *auth.OAuth) http.Handler {
 	adminHost, filesHost := host(cfg.AdminURL), host(cfg.FilesURL)
-	adminApp := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, cfg.FilesURL, p, sessions, cli, s).Handler()
+	app := admin.New(cfg.OwnerEmail, cfg.OwnerGitHubID, cfg.AdminURL, cfg.FilesURL, p, sessions, cli, s)
+	app.OAuth, app.MCPResource, app.MCPClientID, app.MCPRedirectURIs = oauth, cfg.MCPResourceURL, cfg.MCPClientID, cfg.MCPRedirectURIs
+	adminApp := app.Handler()
 	cliAPI := api.New(cfg.AdminURL, cfg.FilesURL, cli, s).Handler()
 	files := serving.New(s, sessions, cfg.AdminURL, cfg.FilesURL).Handler()
 

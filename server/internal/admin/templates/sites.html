@@ -15,6 +15,7 @@
 
 <main class="page">
   <h1>Sites</h1>
+  {{if .MCPEnabled}}<p><a href="/oauth/connections">Manage MCP connections</a></p>{{end}}
   {{with .Error}}<p class="alert" role="alert">{{.}}</p>{{end}}
 
   {{if .Sites}}

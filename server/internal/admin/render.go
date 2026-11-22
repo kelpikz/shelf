@@ -25,7 +25,7 @@ func loadPages() map[string]*template.Template {
 		"endsIn": endsIn,
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login.html", "thanks.html", "sites.html", "cli.html"} {
+	for _, name := range []string{"login.html", "thanks.html", "sites.html", "cli.html", "oauth.html", "oauth-connections.html"} {
 		pages[name] = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/base.html", "templates/"+name))
 	}
 	return pages

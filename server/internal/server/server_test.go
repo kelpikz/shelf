@@ -54,7 +54,7 @@ func newServer(t *testing.T) *testServer {
 	cfg := config.Config{OwnerEmail: owner, OwnerGitHubID: 1, AdminURL: adminURL, FilesURL: filesURL, DataDir: dir}
 	ts := &testServer{sites: sites.New(db, dir), sessions: auth.NewSessions(db), cli: auth.NewCLI(db)}
 	ts.cli.PollEvery = 0
-	ts.h = New(cfg, fakeGitHub{}, ts.sessions, ts.cli, ts.sites)
+	ts.h = New(cfg, fakeGitHub{}, ts.sessions, ts.cli, ts.sites, auth.NewOAuth(db))
 	return ts
 }
 
