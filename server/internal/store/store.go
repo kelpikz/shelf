@@ -3,7 +3,6 @@ package store
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -78,9 +77,9 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db, func() error { return backupDatabase(db, dataDir) }); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("create tables: %w", err)
+		return nil, err
 	}
 	return db, nil
 }

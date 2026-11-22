@@ -5,6 +5,7 @@ mod keystore;
 mod links;
 mod login;
 mod manage;
+mod mcp;
 mod pack;
 mod secrets;
 mod ui;
@@ -36,6 +37,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Serve the authenticated MCP endpoint (settings come from env variables)
+    Mcp,
     /// List Public and Private Sites
     List {
         /// Include Archived Sites
@@ -117,6 +120,7 @@ enum ConfigAction {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
+        Command::Mcp => mcp::run(),
         // No server check first: this command must work to fix a bad saved server.
         Command::Config { action } => config_command(action),
         command => active_server().and_then(|(server, _)| run(&server, command)),
@@ -157,6 +161,7 @@ fn run(server: &str, command: Command) -> Result<()> {
             allow_secrets,
         } => upload::run(server, &source, &path, yes, allow_secrets),
         Command::Config { .. } => unreachable!("handled in main"),
+        Command::Mcp => unreachable!("handled in main"),
     }
 }
 

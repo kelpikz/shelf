@@ -13,14 +13,18 @@ import (
 )
 
 type App struct {
-	OwnerEmail    string
-	OwnerGitHubID int64
-	AdminURL      string // origin of the admin host, for the Origin check
-	FilesURL      string // origin of the Sites host, for the links to Sites
-	Provider      auth.Provider
-	Sessions      *auth.Sessions
-	CLI           *auth.CLI
-	Sites         *sites.Sites
+	OwnerEmail      string
+	OwnerGitHubID   int64
+	AdminURL        string // origin of the admin host, for the Origin check
+	FilesURL        string // origin of the Sites host, for the links to Sites
+	Provider        auth.Provider
+	Sessions        *auth.Sessions
+	CLI             *auth.CLI
+	Sites           *sites.Sites
+	OAuth           *auth.OAuth
+	MCPResource     string
+	MCPClientID     string
+	MCPRedirectURIs []string
 
 	pages map[string]*template.Template
 }
@@ -48,6 +52,17 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /cli/approve/{step}", a.cliApproveStep)
 	mux.HandleFunc("POST /cli/keys/{id}/revoke", a.revokeKey)
 	mux.HandleFunc("POST /cli/keys/{id}/update", a.updateKey)
+	if a.OAuth != nil && a.MCPResource != "" {
+		mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.oauthMetadata)
+		mux.HandleFunc("GET /.well-known/oauth-protected-resource", a.oauthResourceMetadata)
+		mux.HandleFunc("GET /oauth/authorize", a.oauthAuthorize)
+		mux.HandleFunc("POST /oauth/authorize", a.oauthDecision)
+		mux.HandleFunc("POST /oauth/token", a.oauthToken)
+		mux.HandleFunc("POST /oauth/revoke", a.oauthRevoke)
+		mux.HandleFunc("GET /oauth/session", a.oauthSession)
+		mux.HandleFunc("GET /oauth/connections", a.oauthConnections)
+		mux.HandleFunc("POST /oauth/connections/{id}/revoke", a.oauthRevokeConnection)
+	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	return securityHeaders(mux)
 }
@@ -91,6 +106,6 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	}
 	a.render(w, http.StatusOK, "sites.html", map[string]any{
 		"Session": sess, "Sites": live, "Archived": archived, "Keys": keys, "FilesURL": a.FilesURL,
-		"Now": a.CLI.Now(), "Error": siteErrors[r.URL.Query().Get("error")],
+		"Now": a.CLI.Now(), "Error": siteErrors[r.URL.Query().Get("error")], "MCPEnabled": a.OAuth != nil && a.MCPResource != "",
 	})
 }

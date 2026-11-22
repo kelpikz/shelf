@@ -1,0 +1,19 @@
+{{define "title"}}MCP connections{{end}}
+{{define "content"}}
+<main class="page">
+  <h1>MCP connections</h1>
+  <p>Revocation stops access and refresh tokens for the connection. Your browser login and CLI keys stay active.</p>
+  {{range .Connections}}
+  <section class="card">
+    <h2>{{.ClientID}}</h2>
+    <p>Permission: {{.Scope}}</p>
+    <p>Expires: {{.ExpiresAt.UTC.Format "2006-01-02 15:04"}} UTC</p>
+    <form method="post" action="/oauth/connections/{{.ID}}/revoke">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn btn-ghost">Revoke connection</button>
+    </form>
+  </section>
+  {{else}}<p>No active MCP connections.</p>{{end}}
+  <a href="/">Back to Sites</a>
+</main>
+{{end}}
