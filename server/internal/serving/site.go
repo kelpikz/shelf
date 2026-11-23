@@ -15,6 +15,8 @@ func (s *Serving) authorizeSiteView(w http.ResponseWriter, r *http.Request, site
 	}
 	if site.Visibility == sites.Unlisted && !site.Archived {
 		w.Header().Set("X-Robots-Tag", "noindex")
+		// Revalidate each time, so a Visibility change takes effect at once.
+		w.Header().Set("Cache-Control", "no-cache")
 		return true
 	}
 	allowed, err := s.ownerView(r)

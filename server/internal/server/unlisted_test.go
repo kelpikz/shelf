@@ -28,6 +28,9 @@ func TestUnlistedSiteOpensButIsNotListed(t *testing.T) {
 	if resp.Header.Get("X-Robots-Tag") != "noindex" {
 		t.Error("unlisted file has no X-Robots-Tag: noindex")
 	}
+	if resp.Header.Get("Cache-Control") != "no-cache" {
+		t.Error("unlisted file has no Cache-Control: no-cache")
+	}
 	if resp := ts.get(filesURL + "/gone/"); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("archived unlisted: got %d", resp.StatusCode)
 	}
