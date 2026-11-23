@@ -32,8 +32,9 @@ const (
 type Visibility string
 
 const (
-	Public  Visibility = "public"
-	Private Visibility = "private"
+	Public   Visibility = "public"
+	Private  Visibility = "private"
+	Unlisted Visibility = "unlisted" // open to anyone with the link, not on the Index page
 )
 
 type Site struct {
@@ -127,7 +128,7 @@ func (site Site) URL() string {
 	return "/" + site.Path + "/"
 }
 
-// SetVisibility makes the Site at path Public or Private.
+// SetVisibility makes the Site at path Public, Unlisted, or Private.
 func (s *Sites) SetVisibility(ctx context.Context, path string, v Visibility) error {
 	_, err := s.Change(ctx, path, Changes{Visibility: &v})
 	return err

@@ -20,14 +20,14 @@ The site is currently live at https://files.ajitha.fyi
 
 ![The Index page](assets/screenshots/index-page.png)
 
-**The Admin page manages Public, Private, and Archived Sites:**
+**The Admin page manages Public, Unlisted, Private, and Archived Sites:**
 
 ![The Admin page](assets/screenshots/admin-page.png)
 
 ## Features
 
 - **One command to upload.** Upload a file or a folder to a path. An upload to a path that is in use replaces the Site in one step.
-- **Public and Private Sites.** A new Site is Private. Only the Owner can see it. When you make it Public, it shows on the Index page.
+- **Public, Unlisted, and Private Sites.** A new Site is Private. Only the Owner can see it. When you make it Public, it shows on the Index page. When you make it Unlisted, anyone with the link can open it, but it is not on the Index page.
 - **Archive and delete.** Archive takes a Site offline but keeps its files. Delete removes it permanently.
 - **Upload checks.** Before an upload, the CLI finds broken links, links that start with `/`, and secrets such as API keys.
 - **GitHub login.** One Owner only, and no sign-up. The CLI logs in through the browser, the same as `gh auth login`.

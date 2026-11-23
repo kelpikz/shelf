@@ -118,8 +118,8 @@ func (s *Serving) serveSite(w http.ResponseWriter, r *http.Request) (again bool)
 	return false
 }
 
-// index is the Index page: all Sites that are not archived. Private Sites
-// show only to a signed-in Owner.
+// index is the Index page: all Sites that are not archived. Private and
+// Unlisted Sites show only to a signed-in Owner.
 func (s *Serving) index(w http.ResponseWriter, r *http.Request) {
 	owner, err := s.ownerView(r)
 	if err != nil {

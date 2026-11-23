@@ -95,7 +95,7 @@ The health request returns `ok`. This checks local HTTP access, not GitHub login
 After you configure nginx, check `/healthz` through both public HTTPS hosts too.
 Open the Admin page and complete GitHub login.
 Run `shelf login` on your computer, then upload a test Site.
-Check replacement, Public and Private Visibility, archive, unarchive, and delete.
+Check replacement, Public, Unlisted, and Private Visibility, archive, unarchive, and delete.
 The signed-in Owner can open Private and Archived Sites. Visitors get 404 for both.
 Log out of the Admin page and confirm that Owner viewing access ends.
 

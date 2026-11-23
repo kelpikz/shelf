@@ -14,7 +14,7 @@ type Changes struct {
 	Archived   *bool       `json:"archived"`
 }
 
-var ErrBadChange = errors.New("set either visibility to public or private, or archived to true or false")
+var ErrBadChange = errors.New("set either visibility to public, unlisted, or private, or archived to true or false")
 
 // Change returns the record produced by this write, even if another request
 // changes or deletes the Site before the caller sends its response.
@@ -25,7 +25,9 @@ func (s *Sites) Change(ctx context.Context, path string, change Changes) (Site, 
 	field := "archived"
 	var value any
 	if change.Visibility != nil {
-		if *change.Visibility != Public && *change.Visibility != Private {
+		switch *change.Visibility {
+		case Public, Private, Unlisted:
+		default:
 			return Site{}, ErrBadChange
 		}
 		field = "visibility"

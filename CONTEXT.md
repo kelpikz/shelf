@@ -21,7 +21,7 @@ One file or one folder that the Owner uploads to one path, for example `/test`.
 _Avoid_: page, project, website
 
 **Visibility**:
-Who can see a Site. A Site is **Public** (anyone can see it, and it is on the Index page) or **Private** (only the Owner can see it). A new Site is Private.
+Who can see a Site. A Site is **Public** (anyone can see it, and it is on the Index page), **Unlisted** (anyone with the link can see it, but it is not on the Index page for Visitors), or **Private** (only the Owner can see it). A new Site is Private.
 _Avoid_: access level, published, unpublished
 
 **Archived**:
@@ -29,7 +29,7 @@ A Site that is offline for Visitors. The signed-in Owner can still open it. It k
 _Avoid_: hidden, disabled, inactive
 
 **Index page**:
-The page at `files.ajitha.fyi/`. It lists all Public Sites. The signed-in Owner also sees the Private Sites. Archived Sites are not on it. It is not the `index.html` file of a folder Site.
+The page at `files.ajitha.fyi/`. It lists all Public Sites. The signed-in Owner also sees the Unlisted and Private Sites. Archived Sites are not on it. It is not the `index.html` file of a folder Site.
 _Avoid_: home page, directory, listing
 
 ### Tools

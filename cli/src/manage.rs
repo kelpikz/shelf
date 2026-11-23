@@ -53,7 +53,7 @@ pub fn list(server: &str, all: bool) -> Result<()> {
     );
     for (path, visibility, site) in rows {
         let style = match site.visibility {
-            Visibility::Public => ui::GOOD,
+            Visibility::Public | Visibility::Unlisted => ui::GOOD,
             Visibility::Private => ui::WARN,
         };
         println!(

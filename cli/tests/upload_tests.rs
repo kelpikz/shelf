@@ -144,6 +144,21 @@ fn list_all_keeps_archived_labels_and_url_alignment() {
 }
 
 #[test]
+fn unlisted_command_sends_the_visibility() {
+    let server = Server::new(vec![reply(200, &site("unlisted", false).to_string())]);
+    let result = server
+        .command()
+        .args(["unlisted", "demo"])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{}", output(&result));
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests[0].line, "PATCH /api/v1/sites/demo HTTP/1.1\r\n");
+    assert_eq!(requests[0].body, br#"{"visibility":"unlisted"}"#);
+    assert!(output(&result).contains("unlisted"));
+}
+
+#[test]
 fn list_empty_has_no_table_header() {
     let server = Server::new(vec![reply(200, "[]")]);
     let result = server.command().arg("list").output().unwrap();

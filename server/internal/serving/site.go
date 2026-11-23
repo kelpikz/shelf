@@ -7,10 +7,16 @@ import (
 	"github.com/kelpikz/shelf/server/internal/sites"
 )
 
-// authorizeSiteView lets everyone see a live Public Site. Only the signed-in
-// Owner sees a Private or Archived Site; others get the not-found page.
+// authorizeSiteView lets everyone see a live Public or Unlisted Site. Only the
+// signed-in Owner sees a Private or Archived Site; others get the not-found page.
 func (s *Serving) authorizeSiteView(w http.ResponseWriter, r *http.Request, site sites.Site) bool {
 	if site.Visibility == sites.Public && !site.Archived {
+		return true
+	}
+	if site.Visibility == sites.Unlisted && !site.Archived {
+		w.Header().Set("X-Robots-Tag", "noindex")
+		// Revalidate each time, so a Visibility change takes effect at once.
+		w.Header().Set("Cache-Control", "no-cache")
 		return true
 	}
 	allowed, err := s.ownerView(r)

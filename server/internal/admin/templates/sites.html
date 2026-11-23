@@ -85,14 +85,18 @@
 <div class="site">
   <div class="site-info">
     <a class="site-path" href="{{$.FilesURL}}{{if or .Archived (eq .Visibility "private")}}/_shelf/login?return={{.URL}}{{else}}{{.URL}}{{end}}">/{{.Path}}</a>
-    <span class="badge {{if eq .Visibility "public"}}badge-public{{end}}">{{if eq .Visibility "public"}}Public{{else}}Private{{end}}</span>
+    <span class="badge {{if eq .Visibility "public"}}badge-public{{else if eq .Visibility "unlisted"}}badge-unlisted{{end}}">{{if eq .Visibility "public"}}Public{{else if eq .Visibility "unlisted"}}Unlisted{{else}}Private{{end}}</span>
     <span class="muted small">{{if eq .Kind "file"}}{{.File}} · {{end}}{{.UpdatedAt.UTC.Format "2 Jan 2006, 15:04"}} UTC</span>
   </div>
   <div class="site-actions">
-    {{if eq .Visibility "public"}}
-    <form method="post" action="/sites/{{.Path}}/private"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make private</button></form>
-    {{else}}
+    {{if ne .Visibility "public"}}
     <form method="post" action="/sites/{{.Path}}/public"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make public</button></form>
+    {{end}}
+    {{if ne .Visibility "unlisted"}}
+    <form method="post" action="/sites/{{.Path}}/unlisted"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make unlisted</button></form>
+    {{end}}
+    {{if ne .Visibility "private"}}
+    <form method="post" action="/sites/{{.Path}}/private"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Make private</button></form>
     {{end}}
     {{if .Archived}}
     <form method="post" action="/sites/{{.Path}}/unarchive"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="btn btn-ghost btn-small">Unarchive</button></form>
