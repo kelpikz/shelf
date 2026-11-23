@@ -25,7 +25,7 @@ func TestSiteManagementAPI(t *testing.T) {
 			t.Fatalf("list: %+v", list)
 		}
 	}
-	for _, change := range []map[string]any{{"visibility": "public"}, {"visibility": "private"}, {"archived": true}, {"archived": false}} {
+	for _, change := range []map[string]any{{"visibility": "public"}, {"visibility": "unlisted"}, {"visibility": "private"},{"archived": true}, {"archived": false}} {
 		resp := ts.api("PATCH", "/sites/draft", key, change)
 		if resp.StatusCode != 200 {
 			t.Fatalf("change %+v: %d %s", change, resp.StatusCode, body(resp))

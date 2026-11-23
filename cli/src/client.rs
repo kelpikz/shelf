@@ -84,6 +84,7 @@ impl SiteKind {
 pub enum Visibility {
     Public,
     Private,
+    Unlisted,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -107,6 +108,7 @@ impl Visibility {
         match self {
             Self::Public => "public",
             Self::Private => "private",
+            Self::Unlisted => "unlisted",
         }
     }
 }

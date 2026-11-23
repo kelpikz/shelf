@@ -27,6 +27,8 @@ func (a *App) siteAction(w http.ResponseWriter, r *http.Request) {
 		err = a.Sites.SetVisibility(ctx, path, sites.Public)
 	case "private":
 		err = a.Sites.SetVisibility(ctx, path, sites.Private)
+	case "unlisted":
+		err = a.Sites.SetVisibility(ctx, path, sites.Unlisted)
 	case "archive":
 		err = a.Sites.SetArchived(ctx, path, true)
 	case "unarchive":

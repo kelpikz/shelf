@@ -46,8 +46,10 @@ pub fn run(server: &str, source: &Path, path: &str, yes: bool, allow_secrets: bo
             site.visibility.as_str(),
             site.archived
         ));
-        if site.visibility == Visibility::Public {
-            ui::warn("The replacement files will be Public too.");
+        match site.visibility {
+            Visibility::Public => ui::warn("The replacement files will be Public too."),
+            Visibility::Unlisted => ui::warn("The replacement files will be Unlisted too."),
+            Visibility::Private => {}
         }
         if site.archived {
             ui::warn("The Site will stay Archived.");
@@ -65,7 +67,7 @@ pub fn run(server: &str, source: &Path, path: &str, yes: bool, allow_secrets: bo
         site.visibility.as_str(),
         site.archived
     ));
-    if site.visibility == Visibility::Public {
+    if site.visibility != Visibility::Private {
         ui::warn("Browsers may still show old files from their cache.");
     }
     Ok(())

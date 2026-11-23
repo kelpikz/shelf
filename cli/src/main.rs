@@ -36,7 +36,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List Public and Private Sites
+    /// List Public, Unlisted, and Private Sites
     List {
         /// Include Archived Sites
         #[arg(long)]
@@ -44,6 +44,8 @@ enum Command {
     },
     /// Make a Site Public
     Public { path: String },
+    /// Make a Site Unlisted: open with the link, not on the Index page
+    Unlisted { path: String },
     /// Make a Site Private
     Private { path: String },
     /// Take a Site offline for Visitors
@@ -135,6 +137,9 @@ fn run(server: &str, command: Command) -> Result<()> {
         Command::List { all } => manage::list(server, all),
         Command::Public { path } => {
             manage::change(server, &path, SiteChange::Visibility(Visibility::Public))
+        }
+        Command::Unlisted { path } => {
+            manage::change(server, &path, SiteChange::Visibility(Visibility::Unlisted))
         }
         Command::Private { path } => {
             manage::change(server, &path, SiteChange::Visibility(Visibility::Private))

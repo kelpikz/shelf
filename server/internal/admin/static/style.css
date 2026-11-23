@@ -239,6 +239,7 @@ code {
 }
 
 .badge-public { color: var(--accent); border-color: var(--accent); }
+.badge-unlisted { color: var(--accent); border-color: var(--accent); border-style: dashed; }
 
 .site-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 6px; }
 .site-actions form { margin: 0; }
